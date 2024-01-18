@@ -1,7 +1,6 @@
 import numpy as np
 
 class SpecData: 
-  calib_mspc = 1
   calib_sspc = np.array([
     [0.0010,      0.00,    1.000000],
     [2.4414,      2.44,    1.000000],
@@ -262,6 +261,58 @@ class SpecData:
     [9999.9900,  9999.990,  0.015625]
   ])
 
+  calib_mspc = np.array([
+    [102.5391,  25.63,  0.814584, 1.00000],
+    [112.3047,  28.08,  0.798828, 1.00000],
+    [122.0703,  30.52,  0.783377, 1.33333],
+    [129.3945,  32.35,  0.771986, 1.00000],
+    [139.1602,  34.79,  0.757054, 1.33333],
+    [146.4844,  36.62,  0.746045, 1.00000],
+    [156.2500,  39.06,  0.731616, 0.66667],
+    [170.8984,  42.72,  0.710492, 0.50000],
+    [190.4297,  47.61,  0.683274, 0.66667],
+    [205.0781,  51.27,  0.663547, 0.50000],
+    [224.6094,  56.15,  0.638126, 0.50000],
+    [244.1406,  61.04,  0.613680, 0.66667],
+    [258.7891,  64.70,  0.595962, 0.50000],
+    [278.3203,  69.58,  0.573131, 0.66667],
+    [292.9688,  73.24,  0.556584, 0.50000],
+    [312.5000,  78.12,  0.535261, 0.33333],
+    [341.7969,  85.45,  0.504800, 0.25000],
+    [380.8594,  95.21,  0.466863, 0.33333],
+    [410.1562, 102.54,  0.440294, 0.25000],
+    [449.2188, 112.30,  0.407205, 0.25000],
+    [488.2812, 122.07,  0.376603, 0.33333],
+    [517.5781, 129.39,  0.355171, 0.25000],
+    [556.6406, 139.16,  0.328479, 0.33333],
+    [585.9375, 146.48,  0.309786, 0.25000],
+    [625.0000, 156.25,  0.286505, 0.16667],
+    [683.5938, 170.90,  0.254823, 0.12500],
+    [761.7188, 190.43,  0.217961, 0.16667],
+    [820.3125, 205.08,  0.193859, 0.12500],
+    [898.4375, 224.61,  0.165816, 0.12500],
+    [976.5625, 244.14,  0.141830, 0.16667],
+    [035.1562, 258.79,  0.126146, 0.12500],
+    [113.2812, 278.32,  0.107899, 0.16667],
+    [171.8750, 292.97,  0.095967, 0.12500],
+    [250.0000, 312.50,  0.082085, 0.08333],
+    [367.1875, 341.80,  0.064935, 0.06250],
+    [523.4375, 380.86,  0.047507, 0.08333],
+    [640.6250, 410.16,  0.037581, 0.06250],
+    [796.8750, 449.22,  0.027495, 0.06250],
+    [953.1250, 488.28,  0.020116, 0.08333],
+    [070.3125, 517.58,  0.015913, 0.06250],
+    [226.5625, 556.64,  0.011642, 0.08333],
+    [343.7500, 585.94,  0.009210, 0.06250],
+    [500.0000, 625.00,  0.006738, 0.04167],
+    [734.3750, 683.59,  0.004216, 0.03125],
+    [046.8750, 761.72,  0.002257, 0.04167],
+    [281.2500, 820.31,  0.001412, 0.03125],
+    [593.7500, 898.44,  0.000756, 0.03125],
+    [906.2500, 976.56,  0.000405, 0.06250],
+    [999.9900, 1000.00, 0.000335, 0.03125]
+  ])
+  
   def __init__(self, payload, background_intervals=[], event_intervals=[], is_slow=True):
     self.payload = payload
     self.background_intervals = background_intervals 
@@ -294,28 +345,94 @@ class SpecData:
     self.fitrange = np.ones(2, dtype="float") * -1                    #fitting range of energies
     self.numparams = -1                                               #number of fit parameters
     self.params = np.ones(10, dtype="float") * -1                     #fit parameters
-    self.param_ranges = np.ones(10,2, dtype="float") * -1             #1-sigma ranges on fit parameters
+    self.param_ranges = np.ones([10,2], dtype="float") * -1             #1-sigma ranges on fit parameters
     self.chisq = -1                                                   #chi-square of fit (unreduced)
     self.chi_dof = -1                                                 #degrees of freedom for chi-square of fit
     self.modvals = np.ones(self.size, dtype="float") * -1             #values of model fit at center of each bin
     self.secondmodvals = np.ones(self.size, dtype="float") * -1       #values of 2nd component at center of each bin 
+    self.ebins = self._make_standard_energies()
+    self.elebins = self._make_standard_electron_energies()
+
+  @staticmethod
+  def edge_products(edges):
+    n_edges = len(edges)
+    if (n_edges == 1):
+      return
+    
+    dims = 
 
   def _make_standard_energies(self):
-    n=datin(barrel_find_file('barrel_calib_sspcbin.txt','barrel_sp_v3.4'),4,d)$
-  else $
-    n=datin(barrel_find_file('barrel_calib_mspcbin.txt','barrel_sp_v3.4'),5,d)
-  ebins = reform(d[1,*])
-  return ebins
-
+    d = SpecData.calib_sspc if self.is_slow else SpecData.calib_mspc
+    return d[:,1]
+  
   def _make_standard_electron_energies(self):
-    e0 = barrel_make_standard_energies(slow=slow)
-    if keyword_set(slow) then e=e0 else begin
-      e = fltarr( (n_elements(e0)-1)*3 + 1 + 40 )
-      for i=0, n_elements(e0)-2 do $
-         e[3*i : 3*i + 2] = e0[i]+(e0[i+1]-e0[i])*findgen(3)/3. 
-      e[3*i] = e0[i]
-      for j=1,40 do e[3*i+j] = e[3*i] + j*100.
-   endelse
-   return e
+    #get sspc standard energies
+    e0 = self._make_standard_energies()
+    
+    if self.is_slow:
+      e = e0
+    else:
+      #if we are using mspc, we need to interpolate 
+      max_index = len(e0) - 1
+      scale_factor = np.arange(3)/3
+      e = np.zeros((max_index)*3 + 1 + 40)
+      
+      #the new array `e` will have 2 new elements added between each element of `e0`, scaled linearly
+      for i in range(max_index):
+        e[3*i : (3*i)+3] = e0[i] + (e0[i+1] - e0[i]) * scale_factor 
+      
+      #add the last value of `e0` to `e`
+      e[max_index*3] = e0[max_index]
 
-SpecData.
+      #add an extra 40 energy levels in steps of 100 starting at the highest energy of `e0`
+      e[len(e)-40:len(e)] = [num*100 for num in range(1,41)] + e0[max_index]
+    return e
+
+  def _get_altitude(self):
+    return
+  
+  def _get_maglat(self):
+    return
+  
+  def _make_drm(self, altitude=None, angledist=1, whichone=1):
+    if angledist == 1:
+      pitch = 'iso'
+    elif angledist == 2:
+      pitch = 'mir'
+    else:
+      raise ValueError('Invalid value for angular distribution index.')
+
+    if whichone != 1 and whichone != 2:
+      raise ValueError('Bad response matrix ID number.')
+    
+    #Set up the response matrix
+    ctbins = self.ebins
+    elebins = self.elebins
+    nct = len(ctbins)
+    nel = len(elebins)
+    edge_products,ctbins,mean=ctmean,width=ctwidth
+    edge_products,elebins,mean=elmean,width=elwidth
+    drm = np.ones([nel-1,nct-1], dtype="float")
+
+;Build the DRM row by row:
+for i=0, nel-2 do begin
+   row = barrel_sp_drm_row(altitude,elmean[i],ctbins,pitch=pitch)
+   drm[i,*] = row
+endfor
+
+;Normalization factor derived from GEANT simulations:
+;100000000. input e- / (!pi*120.cm^2) = 2210.49 electrons/cm2.
+drm = drm/2210.49
+
+ss.elebins = elebins
+
+if whichone eq 1 then begin
+       ss.drm = drm 
+       ss.drmtype = angledist
+endif else begin
+       ss.drm2 = drm
+       ss.drm2type = angledist
+endelse
+
+    return
+
