@@ -355,11 +355,36 @@ class SpecData:
 
   @staticmethod
   def edge_products(edges):
-    n_edges = len(edges)
-    if (n_edges == 1):
-      return
+
+    if isinstance(edges, list):
+      array_version = np.array(input_array)
+
+    if not isinstance(edges, np.ndarray):
+      raise ValueError("Input must be a list or a NumPy array")
+
+    #Set up defaults for degenerate case of single value
+    width = 0.0
+    mean = edges
+    gmean = edges
+    edges_2 = edges
+    edges_1 = edges
     
-    dims = 
+    if edges.size == 1:
+      return [width, mean, gmean]
+
+    dims = edges.shape
+    if dims[1] == 2:
+        edges_2 = edges
+        edges_1 = np.concatenate([edges_2[:,1],[edges_2[:,0][-1]]])
+    else:
+        edges_2 = np.array([edges[0:-1], edges[1]]).transpose()
+        edges_1 = edges
+
+    mean = edges_2.sum(1)/2
+    gmean = np.sqrt((edges_2[:,0]*edges_2[:, 1]))
+    width = np.abs(edges_2[:,1]-edges_2[:,0])
+
+    return [width, mean, gmean]
 
   def _make_standard_energies(self):
     d = SpecData.calib_sspc if self.is_slow else SpecData.calib_mspc
