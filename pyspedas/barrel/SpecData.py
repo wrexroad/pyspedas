@@ -398,7 +398,7 @@ class SpecData:
       e = e0
     else:
       #if we are using mspc, we need to interpolate 
-      max_index = len(e0) - 1
+      max_index = e0.size - 1
       scale_factor = np.arange(3)/3
       e = np.zeros((max_index)*3 + 1 + 40)
       
@@ -410,7 +410,7 @@ class SpecData:
       e[max_index*3] = e0[max_index]
 
       #add an extra 40 energy levels in steps of 100 starting at the highest energy of `e0`
-      e[len(e)-40:len(e)] = [num*100 for num in range(1,41)] + e0[max_index]
+      e[e.size-40:e.size] = [num*100 for num in range(1,41)] + e0[max_index]
     return e
 
   def _get_altitude(self):
@@ -419,7 +419,10 @@ class SpecData:
   def _get_maglat(self):
     return
   
-  def _make_drm(self, altitude=None, angledist=1, whichone=1):
+  def _barrel_sp_drm_row(self):
+    return
+
+  def _make_drm(self, altitude, angledist=1, whichone=1):
     if angledist == 1:
       pitch = 'iso'
     elif angledist == 2:
@@ -433,31 +436,25 @@ class SpecData:
     #Set up the response matrix
     ctbins = self.ebins
     elebins = self.elebins
-    nct = len(ctbins)
-    nel = len(elebins)
-    edge_products,ctbins,mean=ctmean,width=ctwidth
-    edge_products,elebins,mean=elmean,width=elwidth
-    drm = np.ones([nel-1,nct-1], dtype="float")
+    nct = ctbins.size
+    nel = elebins.size
+    #[ctwidth, ctmean, gmean] = SpecData.edge_products(ctbins)
+    [elwidth, elmean, gmean] = SpecData.edge_products(elebins)
+    
+    drm = np.ones([nct-1, nel-1], dtype="float")
 
-;Build the DRM row by row:
-for i=0, nel-2 do begin
-   row = barrel_sp_drm_row(altitude,elmean[i],ctbins,pitch=pitch)
-   drm[i,*] = row
-endfor
+    #Build the DRM row by row:
+    for i in np.arrange(nel-2):
+      row = self.barrel_sp_drm_row(altitude, elmean[i], ctbins, pitch)
+      drm[:, i] = row
 
-;Normalization factor derived from GEANT simulations:
-;100000000. input e- / (!pi*120.cm^2) = 2210.49 electrons/cm2.
-drm = drm/2210.49
+    #Normalization factor derived from GEANT simulations:
+    #100000000. input e- / (!pi*120.cm^2) = 2210.49 electrons/cm2.
+    drm = drm/2210.49
 
-ss.elebins = elebins
-
-if whichone eq 1 then begin
-       ss.drm = drm 
-       ss.drmtype = angledist
-endif else begin
-       ss.drm2 = drm
-       ss.drm2type = angledist
-endelse
-
-    return
-
+    if whichone == 1:
+       self.drm = drm 
+       self.drmtype = angledist
+    else:
+       self.drm2 = drm
+       self.drm2type = angledist
