@@ -386,6 +386,11 @@ class SpecData:
 
     return [width, mean, gmean]
 
+  @staticmethod  
+  def brl_rebin(oldBins, newBins, oldVals, flux):
+    return
+
+
   def _make_standard_energies(self):
     d = SpecData.calib_sspc if self.is_slow else SpecData.calib_mspc
     return d[:,1]
@@ -418,11 +423,65 @@ class SpecData:
   
   def _get_maglat(self):
     return
-  
-  def _barrel_sp_drm_row(self):
+
+  def _barrel_sp_drm_interp(self, ein, loginterpolate=False, pitch='iso', show=False, verbose=False)
     return
 
-  def _make_drm(self, altitude, angledist=1, whichone=1):
+  def _barrel_sp_drm_row(self, ein, ctbins, pitch="iso"):
+    if pitch != 'iso' and pitch != 'mir':
+      raise ValueError('Illegal distribution name.  Use iso or mir.')
+    
+    if self.altitude < 25:
+      print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude < 25 km, being set to 25 km.")
+      self.altitude = 25
+
+    if self.altitude > 40:
+      print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude > 40 km, being set to 40 km.")
+      self.altitude = 40
+  
+    al = np.array([25, 30, 35, 40])
+
+    if ein < 50 or ein > 4000:
+      return np.zeros(ctbins.size-1)
+
+    for i in np.arange(2):
+      if (self.altitude == al[i]) or (self.altitude == 40):
+        sp = self._barrel_sp_drm_interp(ein, True, pitch)
+        if (sp.size == 1): print("Energy out of range.")
+      else:
+        if (self.altitude > al[i]) and (self.altitude < al[i+1]):
+          sp1 = self._barrel_sp_drm_interp(al[i], ein, True, pitch)
+          sp2 = self._barrel_sp_drm_interp(al[i+1], ein, True, pitch)
+          n1 = sp1.size
+          n2 = sp2.size
+          if (sp1.size == 1): print("Energy out of range.")
+          
+          de = sp2[0,*]-sp1[0,*]
+          ga = (self.altitude - al[i])/5.
+          sp = np.zeros([sp2[:, 1].size, 2])
+          sp[:, 0] = sp2[:, 0]
+          sp[:, 1] = sp1[:, 1] + ga*(sp2[:, 1] - sp1[:, 1])
+
+#MOVE TO NOTEBOOK
+#          if keyword_set(show):
+#            plot,sp1[:, 0],sp1[:, 1],/xlog,/ylog,xrange=[10,10000],$
+#              yrange=[0.01,10000],psym=5,symsize=0.5,$
+#              xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev',$
+#              title='Altitude: '+strtrim(self.altitude,2)+' km; Energy: '+strtrim(ein,2)+' keV'
+#            oplot,sp2[0,*],sp2[1,*],psym=4,symsize=0.4		
+#            oplot,sp[0,*],sp[1,*]
+
+    #rebin to desired energy bins:
+    s1 = sp[:, 1]
+    e1 = np.concatenate((sp[:, 0] - 0.5, [sp[-1, 0] + 1.0]))
+    e2 = ctbins
+
+    row = self._brl_rebin(s1, e1, e2, flux=1)
+       
+    return row
+    
+
+  def _make_drm(self, angledist=1, whichone=1):
     if angledist == 1:
       pitch = 'iso'
     elif angledist == 2:
@@ -445,7 +504,7 @@ class SpecData:
 
     #Build the DRM row by row:
     for i in np.arrange(nel-2):
-      row = self.barrel_sp_drm_row(altitude, elmean[i], ctbins, pitch)
+      row = self._barrel_sp_drm_row(elmean[i], ctbins, pitch)
       drm[:, i] = row
 
     #Normalization factor derived from GEANT simulations:
