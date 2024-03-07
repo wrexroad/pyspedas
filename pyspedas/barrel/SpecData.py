@@ -442,7 +442,7 @@ class SpecData:
     self.maglat = -1
     self.bkg_method = -1                                              #1 =from data stream, 2 =from model
     self.src_spec = np.ones(self.size, dtype="float") * -1            #summed source spectrum, deadtime corrected       
-    self.src_specerr = np.ones(self.size, dtype="float") * -1         #error in summed source spectrum
+    self.src_spec_err = np.ones(self.size, dtype="float") * -1         #error in summed source spectrum
     self.bkg_spec = np.ones(self.size, dtype="float") * -1            #summed background spectrum, deadtime corrected        
     self.bkg_spec_err = np.ones(self.size, dtype="float") * -1        #error in summed background spectrum
     self.src_time = -1                                                #source spectrum accum. time in seconds
@@ -593,7 +593,7 @@ class SpecData:
   def _get_maglat(self):
     return
 
-  def _barrel_sp_drm_interp(self, altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False)
+  def _barrel_sp_drm_interp(self, altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
     #loginterpolate = 1 : logarithmic interpolation
 
     if (pitch != "iso" and pitch != "mir"):
@@ -611,8 +611,6 @@ class SpecData:
     #if (show):
     #  loadct,13
     
-    altstr=str(np.floor(altitude)).strip()
-
     #27 electron energy input curve fitting parms a[0-5]
     if (altitude < 27.5):
       fitparams = SpecData.iso_27e_sspc_rawfit_params["25"]
@@ -623,8 +621,7 @@ class SpecData:
     else:
       fitparams = SpecData.iso_27e_sspc_rawfit_params["40"]
 
-    n1=len(fitparams)
-    es=fitparams[:,0]
+    es = fitparams[:,0]
     if (ein < es[0]) or (ein > 4000.):
       print("Electron energy out of range: {}. Use {}".format(ein, es[0]))
       return 0
@@ -652,11 +649,11 @@ class SpecData:
 
     curve = np.zeros(ein)
     if (g1 == 0.):
-      a = fitparams[1:6,i1]
-      f1 = barrel_sp_brem,ebins,a,f1
+      a = fitparams[i1, 1:7]
+      f1 = self._barrel_sp_brem(ebins, a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = barrel_sp_patch_drmrow,f1
+      f1 = self._barrel_sp_patch_drmrow(f1)
 
       curve = f1
       #For Notebook
@@ -665,18 +662,20 @@ class SpecData:
       #    yrange=[0.0001,10000],$
       #    xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev'
       #else:
-      a=d[1:6,i1]
-      barrel_sp_brem,e1,a,f1
-      a=d[1:6,i2]
-      barrel_sp_brem,e2,a,f2
+      a = fitparams[i1, 1:7]
+      f1 = self._barrel_sp_brem(e1,a)
+      a = fitparams[i2, 1:7]
+      f2 = self._barrel_sp_brem(e2,a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = barrel_sp_patch_drmrow,f1
-      f2 = barrel_sp_patch_drmrow,f2
+      f1 = self._barrel_sp_patch_drmrow(f1)
+      f2 = self._barrel_sp_patch_drmrow(f2)
 
       if (loginterpolate):
-        curve = exp ( $
-        (alog(f1)*(es[i2]-ein) + alog(f2)*(ein-es[i1]) )/(es[i2]-es[i1]))
+        curve = np.exp(
+          (np.log(f1)*(es[i2]-ein) + np.log(f2)*(ein-es[i1]))/
+          (es[i2]-es[i1])
+        )
       else:
         curve = (f1*(es[i2]-ein) + f2*(ein-es[i1])) / (es[i2]-es[i1])
       
@@ -689,11 +688,27 @@ class SpecData:
       #  oplot,e2,f2,color=80,linestyle=2
       #  oplot,ebins,curve
     
-    a = fltarr(2,ein)
-    a[0,*] = ebins
-    a[1,*] = curve
+    a = np.zeros([ein, 2], dtype=float)
+    a[:, 0] = ebins
+    a[:, 1] = curve
 
     return a
+
+  def _barrel_sp_brem(x, a):
+    e0 = a[5] #frozen
+    f = a[0] * np.exp(-(e0/(e0^a[1]-x^a[1])))/x^a[2]*np.exp(-a[3]/(x-a[4]))
+    return f
+
+  def _barrel_sp_patch_drmrow(f):
+    #Look for the signature of an upward spike and zero out above that:
+    n = f.size
+    shift = np.roll(f,1)
+    a = f[1:n]
+    b = shift[1:n]
+    w = np.where(a > b*1000.)[0]
+    if w.size > 0:
+      f[w[0]:n] = 0
+    return f
 
   def _barrel_sp_drm_row(self, ein, ctbins, pitch="iso"):
     if pitch != 'iso' and pitch != 'mir':
@@ -724,7 +739,7 @@ class SpecData:
           n2 = sp2.size
           if (sp1.size == 1): print("Energy out of range.")
           
-          de = sp2[0,*]-sp1[0,*]
+          de = sp2[:, 0]-sp1[:, 0]
           ga = (self.altitude - al[i])/5.
           sp = np.zeros([sp2[:, 1].size, 2])
           sp[:, 0] = sp2[:, 0]
@@ -747,9 +762,8 @@ class SpecData:
     row = SpecData.brl_rebin(s1, e1, e2, flux=1)
        
     return row
-    
-
-  def _make_drm(self, angledist=1, whichone=1):
+  
+  def _barrel_sp_make_drm(self, angledist=1, whichone=1):
     if angledist == 1:
       pitch = 'iso'
     elif angledist == 2:
@@ -785,3 +799,114 @@ class SpecData:
     else:
        self.drm2 = drm
        self.drm2type = angledist
+
+  #NAME: barrel_sp_fold.pro
+  #DESCRIPTION: BARREL top-level spectral folding routine
+  #
+  #REQUIRED INPUTS:
+  #ss        spectrum structure
+  # 
+  #OPTIONAL INPUTS:
+  #method    1 = single-parameter spectrum, single drm, use "model"
+  #          2 = single fixed (file input) spectrum, single drm
+  #          3 = double fixed (file input) spectrum, single drm
+  #          4 = single-parameter spectrum, dual drm, use "model"
+  #          5 = single fixed (file input)) spectrum, dual drm
+  #          6 = double fixed (file input)) spectrum, dual drm
+  #model     spectral model of electron spectrum (default is exponential)
+  #          1 = exponential
+  #          2 = monoenergetic
+  #fitrange  energy range to use for fitting (regardless of full range
+  #          of ebins) (this is a vector [start,end]
+  #maxcycles Maximum number of times to try rescaling range for fit parameters
+  #quiet     Don't make graphs + screen output
+  #verbose   show some debugging info as fits go along
+  #modlfile        Filename for inputting a handmade model component
+  #secondmodlfile  Filename for inputting a second handmade model component
+  #bkg_renorm      match background to source > 3 MeV before subtracting
+  #
+  #OUTPUTS (written into ss structure):
+  #params            best fit parameters
+  #param_ranges      ranges on best fit parameters (1 sigma) (2x2 array)
+  #chisquare         chi-square (not reduced)
+  #dof               degrees of freedom associated with chisquare
+  #modvals           values of the fit function at the centers of the energy bins
+  #
+  #CALLS:
+  #edge_products(), (imported from solarsoft), barrel_sp_fold_m1
+  #through barrel_sp_fold_m6
+  #
+  #NOTES: 
+  #
+  #STATUS: Tested for methods 1&4 on artificial data.
+  #
+  #TO BE ADDED:
+  #     Support for other spectral models
+  #     Support for single + summed fixed spectra (from file), varying normalization
+  #
+  #REVISION HISTORY:
+  #Version 1.0 DMS 7/18/12 -- split out from barrel_folding as the new top layer
+  #                7/24/12 -- fixed minimum of plot to account for
+  #                           possible values << 1 (fixed threshold for minimum
+  #                           of plot changed to 1.d-6 instead of 0.5
+  #                           when there are real values that are too low)
+  #          2.3   8/19/12 -- added support for method 3
+  #          2.5   1/5/13 --  rewrite to support new general
+  #                           spectroscopy structure ss
+  #          2.6   5/29/13 -- adding support for L2 MSPC files (already cts/keV)
+  #          2.8   7/8/13  -- remove call to idl_screen_graphics()
+  #          3.0   9/9/13  -- set ss.numparams here instead of upstream at barrel_sp_make()
+  #          3.2   10/29/13 - Print total, background, and net count
+  #                           rates just before proceeding to fit
+  #                11/12/13 - plot data before fitting in case fit crashes
+  #                11/12/13 - bkg_renorm defaults to zero, not 1.
+  def _barrel_sp_fold(self, maxcycles=30, bkg_renorm=False,
+      method=1, model=1, fitrange=[110, 2500],
+      modlfile = None, secondmodlfile=None, residuals=1):
+    
+    self.method = method
+    self.model = model
+    self.fitrange = fitrange
+    self.bkg_renorm = bkg_renorm
+    self.modlfile = modlfile
+    self.secondmodlfile = secondmodlfile
+
+    #CHECK CONSISTENCY OF INPUT PARAMETERS
+    if (self.method > 4) and (self.drm2type == -1):
+      print('BARREL_SP_FOLD: Method > 3 requires a second response matrix (drm2).')
+    if (self.method != 1 and self.method != 4 and self.modlfile == ""):
+      print('BARREL_SP_FOLD: This method requires a filename for an input model (modlfile)')
+    if (self.method == 3 or self.method == 6 and (self.modlfile == "" or self.secondmodlfile == "")):
+      print('BARREL_SP_FOLD: This method requires two filenames for input models (modlfile, secondmodlfile)')
+
+    #Create energy bin centers and widths, find bins to use in fit:
+    [ctwidth, ctmean, ctgmean] = SpecData.edge_products(self.ebins)
+    [elwidth, elmean, elgmean] = SpecData.edge_products(self.elebins)
+
+    usebins = np.where(ctmean > self.fitrange[0] and ctmean < self.fitrange[1])
+
+    #Subtract background & calculate error bars on subtracted spectrum -- cts/keV:
+    src_spec = self.src_spec/self.src_live 
+    bkg_spec = self.bkg_spec/self.bkg_live 
+    src_spec_err = self.src_spec_err/self.src_live
+    bkg_spec_err = self.bkg_spec_err/self.bkg_live
+    renorm = 1.
+    if (self.bkg_renorm): 
+      #normalize bkg so that it matches src at high energies.
+      #med.spectra will only go up to 4 MeV, so we are keeping a
+      #band at least 750 keV up to that, even though the hardest
+      #drep might put a few counts into the bottom of this range.
+
+      w = np.where(ctmean > 3250. and ctmean < 6750.)
+      renorm = src_spec[w].sum() / bkg_spec[w].sum()
+      print("Background renormalization factor: {}".format(renorm))
+      
+    bkg_spec = self.bkg_spec * renorm
+    subspec = self.src_spec - bkgspec
+    subspec_err = sqrt( srcspecerr^2. + (bkgspecerr*renorm)^2 )
+    print("Total count rate:      {} c/s".format((srcspec*ctwidth).sum()))
+    print("Background count rate: {} c/s".format((bkgspec*ctwidth).sum()))
+    print("Net count rate:        {} c/s".format((subspec*ctwidth).sum()))
+### Pick up on line 120 of barrel_sp_fold.pro
+    return
+    
