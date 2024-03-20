@@ -560,6 +560,24 @@ class SpecData:
       oldLo=oldHi
       oldHi=oldBins[oldIndex+1]
 
+  @staticmethod
+  def barrel_sp_brem(x, a):
+    e0 = a[5] #frozen
+    ff = a[0] * np.exp(-(e0/(e0**a[1]-np.power(x,a[1]))))/np.power(x,a[2])*np.exp(-a[3]/(x-a[4]))
+    return f
+  
+  @staticmethod
+  def barrel_sp_patch_drmrow(f):
+    #Look for the signature of an upward spike and zero out above that:
+    n = f.size
+    shift = np.roll(f,1)
+    a = f[1:]
+    b = shift[1:]
+    w = np.where(a > b*1000.)[0]
+    if w.size > 0:
+      f[w[0]:] = 0
+    return f
+
   def _make_standard_energies(self):
     d = SpecData.calib_sspc if self.is_slow else SpecData.calib_mspc
     return d[:,1]
@@ -632,10 +650,10 @@ class SpecData:
         i1=i
         i2=i
         g1=0.
-      elif ((ein > es[i]) and (ein < es[i+1])):
+      elif ((ein > es_i) and (ein < es[i+1])):
         i1=i
         i2=i+1
-        g1= float((ein-es[i])/(es[i+1]-es[i]))
+        g1= float((ein-es_i)/(es[i+1]-es_i))
 
     # here shift/stretch the energy scale so that 
     # ebins range	[24,ein]
@@ -650,10 +668,10 @@ class SpecData:
     curve = np.zeros(ein)
     if (g1 == 0.):
       a = fitparams[i1, 1:7]
-      f1 = self._barrel_sp_brem(ebins, a)
+      f1 = SpecData.barrel_sp_brem(ebins, a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = self._barrel_sp_patch_drmrow(f1)
+      f1 = SpecData.barrel_sp_patch_drmrow(f1)
 
       curve = f1
       #For Notebook
@@ -663,13 +681,13 @@ class SpecData:
       #    xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev'
       #else:
       a = fitparams[i1, 1:7]
-      f1 = self._barrel_sp_brem(e1,a)
+      f1 = SpecData.barrel_sp_brem(e1,a)
       a = fitparams[i2, 1:7]
-      f2 = self._barrel_sp_brem(e2,a)
+      f2 = SpecData.barrel_sp_brem(e2,a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = self._barrel_sp_patch_drmrow(f1)
-      f2 = self._barrel_sp_patch_drmrow(f2)
+      f1 = SpecData.barrel_sp_patch_drmrow(f1)
+      f2 = SpecData.barrel_sp_patch_drmrow(f2)
 
       if (loginterpolate):
         curve = np.exp(
@@ -693,23 +711,7 @@ class SpecData:
     a[:, 1] = curve
 
     return a
-
-  def _barrel_sp_brem(x, a):
-    e0 = a[5] #frozen
-    f = a[0] * np.exp(-(e0/(e0^a[1]-x^a[1])))/x^a[2]*np.exp(-a[3]/(x-a[4]))
-    return f
-
-  def _barrel_sp_patch_drmrow(f):
-    #Look for the signature of an upward spike and zero out above that:
-    n = f.size
-    shift = np.roll(f,1)
-    a = f[1:n]
-    b = shift[1:n]
-    w = np.where(a > b*1000.)[0]
-    if w.size > 0:
-      f[w[0]:n] = 0
-    return f
-
+  
   def _barrel_sp_drm_row(self, ein, ctbins, pitch="iso"):
     if pitch != 'iso' and pitch != 'mir':
       raise ValueError('Illegal distribution name.  Use iso or mir.')
