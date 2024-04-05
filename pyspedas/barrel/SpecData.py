@@ -505,22 +505,22 @@ class SpecData:
     
     #Do the actual fitting according to the chosen method:
     if method == 1:
-      self.barrel_sp_fold_m1(
+      self._barrel_sp_fold_m1(
         elmean, elwidth, ctwidth, ctmean, usebins, maxcycles,
         params, param_ranges, modvals, chisquare, dof
       )
     elif method == 2:
-      self.barrel_sp_fold_m2(
+      self._barrel_sp_fold_m2(
         subspec, subspecerr, modlfile, ss.drm, ss.elebins, elmean, elwidth, ctwidth, usebins, maxcycles,
         params, param_ranges, modvals, chisquare, dof
       )
     elif method == 3:
-      self.barrel_sp_fold_m3(
+      self._barrel_sp_fold_m3(
         subspec, subspecerr, modlfile, secondmodlfile, ss.drm, ss.elebins, elmean, elwidth, ctwidth, usebins, maxcycles,
         params, param_ranges, modvals, secondmodvals, chisquare, dof
       )
     elif method == 4:
-      self.barrel_sp_fold_m4(
+      self._barrel_sp_fold_m4(
         subspec, subspecerr, model, ss.drm, ss.drm2, elmean, elwidth, ctwidth, usebins, maxcycles,
         params, param_ranges, modvals, chisquare, dof
       )
@@ -680,12 +680,49 @@ class SpecData:
       tryspec = np.matmul(tryspec, self.drm)
     else:
       print('Only exponential or monoenergetic spectrum is currently supported.')
-#START ON LINE 85 of barrel_sp_fold_m1
 
+    #Find a starting normalization by scaling area of model and data
+    #(this will be the same procedure for every starting model):
+    startnorm = (self.subspec[usebins]*ctwidth[usebins] ).sum() / ( tryspec[usebins]*ctwidth[usebins] ).sum()
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = [0.5,0.5]  #[norm,par]: best values +/- 50%
+
+    
+    print('iter#', 'startpar','startnorm','bestpar','bestnorm','scalepar','scalenorm','bestchi')    
+    #format='(a8,4a11,2a13,a10)'
+    
+    #Iterate the fit, adjusting the scale dynamically:
+    #barrel_sp_fitgrid1, subspec, subspecerr, model, drm, phmean, phwidth, usebins, startpar, $
+    #     startnorm, points, scaling, bestpar, bestnorm, bestparn, bestnormn, modvals, $
+    #     chiarray, bestchi, pararray, normarray
+    for i in range(maxcycles):
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = self._barrel_sp_fitgrid1(
+        phmean, phwidth, usebins, startpar, startnorm, points, scaling
+      )
+#CONTINUE from Line 107 in barrel_sp_fold_m1
     return
+  
+
   def _barrel_sp_fold_m2(self):
     return
   def _barrel_sp_fold_m3(self):
     return
   def _barrel_sp_fold_m4(self):
+    return
+  
+  def _barrel_sp_fitgrid1(self):
+    return
+  
+  def _barrel_sp_fitgrid2(self):
+    return
+
+  def _barrel_sp_fitgrid3(self):
+    return
+  
+  def _barrel_sp_fitgrid4(self):
     return
