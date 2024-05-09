@@ -895,7 +895,7 @@ class SpecData:
           y = [foldvals1[i], foldvals2[i], foldvals3[i]]
           x = [phmean[bin1], phmean[bin2], phmean[bin3]]
           r = np.polyfit(x,y,2)
-          foldvals[i] = r[2] + r[1]*parvector[j] + r[0]*np.pow(parvector[j],2)
+          foldvals[i] = r[2] + r[1]*parvector[j] + r[0]*np.power(parvector[j],2)
         
       else:
         print('Only exponential or monoenergetic spectra are currently supported.')
@@ -905,7 +905,7 @@ class SpecData:
         normarray[i,j] = normvector[i]
         pararray[i,j]  = parvector[j]
         chiarray[i,j]  = np.sum(
-          np.pow(
+          np.power(
             (subspec[usebins] - normvector[i]*foldvals[usebins])/subspecerr[usebins],
             2
           )
@@ -935,11 +935,155 @@ class SpecData:
     
     return [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray]
   
-  def _barrel_sp_fitgrid2(self):
-    return
+  def _barrel_sp_fitgrid2(self, phmean, phwidth, usebins, startpar, startnorm, points, scaling):
+    subspec = self.subspec
+    subspecerr = self.subspecerr
+    modelspec = self.modelspec
+    drm = self.drm
 
-  def _barrel_sp_fitgrid3(self):
-    return
+    pts = 2*points + 1
+    normvector = [np.arange(pts)-points]*scaling[0]/points*startnorm + startnorm
+
+    #Set up the output arrays:
+    chiarray = np.zeros(pts)
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1e10
+
+    #Loop away!
+
+    foldvals = np.matmul(drm, modelspec*phwidth)
+    for j in range(pts): #over normalization
+      chiarray[j] = np.sum( np.power( (subspec[usebins] - normvector[j]*foldvals[usebins])/subspecerr[usebins], 2) )
+    normarray = normvector
+
+    #Find the best fit and set output parameters:
+
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestnorm = normarray[w]
+    bestnormn = (np.where(normvector == bestnorm)[0])[0] - points
+    modvals = bestnorm * np.matmul(drm, (modelspec*phwidth) )
+
+    return [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray]
+
+  def _barrel_sp_fitgrid3(self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling):
+    subspec = self.subspec
+    subspecerr = self.subspecerr
+    modelspec1 = self.modelspec1
+    modelspec2 = self.modelspec2
+    drm = self.drm
+
+    #Set up the vectors of values for parameters and normalizations:
+    pts = 2*points + 1
+    norm1vector = [np.arange(pts)-points]*scaling[0]/points*startnorm1 + startnorm1
+    norm2vector = [np.arange(pts)-points]*scaling[1]/points*startnorm2 + startnorm2
+
+    #Set up the output arrays:
+    norm1array = np.zeros([pts,pts])
+    norm2array = np.zeros([pts,pts])
+    chiarray   = np.zeros([pts,pts])
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1e10
+
+    #Loop away!
+
+    for j in range(pts): #over normalization 1
+      foldvals1 = np.matmul(drm, norm1vector[j]*modelspec1*phwidth)
+
+      for i in range(pts): #over normalization 2
+        foldvals2 = np.matmul(drm, norm2vector[i]*modelspec2*phwidth)
+
+        #Test different normalizations against the data:
+        norm1array[j,i] = norm1vector[j]
+        norm2array[j,i] = norm2vector[i]
+        chiarray[j,i] = np.sum( np.power( (subspec[usebins] - (foldvals1[usebins]+foldvals2[usebins])) / subspecerr[usebins] ), 2 )
+
+    #Find the best fit and set output parameters:
+
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestnorm1 = norm1array[w]
+    bestnorm2 = norm2array[w]
+    bestnorm1n = (np.where(norm1vector == bestnorm1)[0])[0] - points
+    bestnorm2n = (np.where(norm2vector == bestnorm2)[0])[0] - points
+    modvals1 = bestnorm1 * np.matmul(drm, (modelspec1*phwidth))
+    modvals2 = bestnorm2 * np.matmul(drm, (modelspec2*phwidth))
+
+    return [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals1, modvals2, chiarray, bestchi, norm1array, norm2array]
   
-  def _barrel_sp_fitgrid4(self):
-    return
+  def _barrel_sp_fitgrid4(self, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling):
+    subspec = self.subspec
+    subspecerr = self.subspecerr
+    model = self.model
+    drm = self.drm
+    drm2 = self.drm2
+
+    #Set up the vectors of values for parameters and normalizations:
+    pts = 2*points + 1
+    normvector = [findgen(pts)-points]*scaling[0]/points*startnorm + startnorm
+    parvector  = [findgen(pts)-points]*scaling[1]/points*startpar + startpar
+    drmvector  = [findgen(pts)-points]*scaling[2]/points + startdrm
+
+    #Rescale drm vector to omit unphysical regions (< 0, > 1):
+    drmlow = np.where(drmvector < 0.)[0]
+    nlow = drmlow.size
+    drmhigh = np.where(drmvector > 1.)[0]
+    nhigh = drmhigh.size
+    drmmin = np.min(drmvector)
+    drmmax = np.max(drmvector)
+    if (nlow > 0):
+      drmmin = 0
+    if (nhigh > 0):
+      drmmax = 1
+    if (nlow > 0 or nhigh > 0):
+      drmvector = drmmin + (drmmax-drmmin)*np.arange(pts)/(1.*(pts-1.))
+
+    #Set up the output arrays:
+    pararray = np.zeros([pts,pts,pts])
+    normarray = np.zeros([pts,pts,pts])
+    drmarray = np.zeros([pts,pts,pts])
+    chiarray = np.zeros([pts,pts,pts])
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1.e10
+
+    #Loop away!
+
+    for k in range(pts):  #over drm
+      thisdrm = drm*drmvector[k] + drm2*(1.0 - drmvector[k])
+
+      for j in range(pts): #over spectral parameter
+        #Set up the model, photons/bin:
+        if (model == 1):
+          vals = np.exp(-phmean/parvector[j])*phwidth
+        else:
+          print('BARREL_SP_FITGRID: Only exponential spectrum is currently supported.')
+
+        #Fold through response matrix
+        foldvals = np.matmul(thisdrm, vals)
+
+        #Test different normalizations against the data:
+        for i in (pts):
+          normarray[i,j,k] = normvector[i]
+          pararray[i,j,k] = parvector[j]
+          drmarray[i,j,k] = drmvector[k]
+          chiarray[i,j,k] = np.sum( np.power( (subspec[usebins] - normvector[i]*foldvals[usebins])/subspecerr[usebins], 2) )
+      
+
+    #Find the best fit and set output parameters:
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestpar = pararray[w]
+    bestnorm = normarray[w]
+    bestdrm = drmarray[w]
+    bestparn = (np.where(parvector = bestpar)[0])[0] - points
+    bestnormn = (np.where(normvector = bestnorm)[0])[0] - points
+    bestdrmn = (np.where(drmvector = bestdrm)[0])[0] - points
+    drmbest =  drm*bestdrm + drm2*(1.0 - bestdrm)
+    
+    if (model == 1):
+      modvals = bestnorm*np.matmul(drmbest, (np.exp(-phmean/bestpar)*phwidth))
+
+    return [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray]
