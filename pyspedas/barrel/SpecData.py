@@ -825,7 +825,7 @@ class SpecData:
     modlfile = self.modlfile
     drm = self.drm
     
-    ### FIX 
+    ### FIX - SHould modelspec be attached to self? Or passed into fitgrid?
     modelspec = barrel_sp_readmodelspec(modlfile, phebins, phmean)
 
     tryspec = np.matmul(drm, modelspec*phwidth)
@@ -946,8 +946,166 @@ class SpecData:
 
     return [params, param_ranges, modvals, chisquare, dof]
 
-  def _barrel_sp_fold_m3(self):
-    return
+  def _barrel_sp_fold_m3(self, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = self.subspec
+    subspecerr = self.subspec_err
+    modlfile = self.modlfile
+    secondmodlfile = self.secondmodlfile
+    drm = self.drm
+
+    ### FIX 
+    modelspec1 = barrel_sp_readmodelspec(modlfile, phebins, phmean)    
+    modelspec2 = barrel_sp_readmodelspec(secondmodlfile, phebins, phmean)
+
+    #Initial starting parameter is equal parts of each model
+    tryspec1 = np.matmul(drm, modelspec1*phwidth)
+    tryspec2 = np.matmul(drm, modelspec2*phwidth)
+
+    #Find a starting normalization by scaling area of model and data;
+    #start with the assumption that each component carries half the counts.
+    startnorm1 = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec1[usebins]*ctwidth[usebins] ) / 2.
+    startnorm2 = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec2[usebins]*ctwidth[usebins] ) / 2.
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = [0.5,0.5]  #[norm1,norm2]: best values +/- 50%
+
+    print('iter#', 'startnorm1','startnorm2','bestnorm1','bestnorm2','scalenorm1','scalenorm2','bestchi')
+    #format='(a8,4a11,2a13,a10)'
+
+    #Iterate the fit, adjusting the scale dynamically:
+    for i in range(maxcycles):
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+        self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      )
+
+      #if best value is not on boundary, zoom in or finish.
+      #Note that zooming in or out on scalingdrm doesn't do anything if
+      #you aren't using two drms.
+
+      if (np.abs(bestnorm1n) != points and scaling[0] >= 0.001):
+        scaling[0] /= 2.5
+      if (np.abs(bestnorm2n) != points and scaling[1] >= 0.001):
+        scaling[1] /= 2.5
+
+      #If scaling is now very fine, break.  Note that the last values of the
+      #scaling parameters recorded here aren't really the last
+      #values used, the last value used could be 2.5 times higher in one or more:
+      if (scaling[0] < 0.001 and scaling[1] < 0.001):
+        break
+
+      if (np.abs(bestnorm1n) == points)
+        scaling[0] *= 2.0
+      if (np.abs(bestnorm2n) == points)
+        scaling[1] *= 2.0
+
+      print(i,startnorm1,startnorm2,bestnorm1,bestnorm2,scaling[0],scaling[1],bestchi)
+      #format='(i8,4f11.3,2f13.6,f13.4)'
+
+      startnorm1 = bestnorm1
+      startnorm2 = bestnorm2
+
+    #If it never got to the finest scale, break with error:
+    if (scaling[0] > 0.001 or scaling[1] > 0.001):
+        print(' Fit failed to converge in maximum number of cycles.')
+
+    #Set most output variables (either 2 or 3 best-fit params depending on
+    #treatment of response matrices:
+    params = [bestnorm1, bestnorm2]
+    chisquare = bestchi
+    dof = usebins.size - 2
+
+    #Only one thing left: the error on the parameters.  This requires more
+    #effort.  Here we will wander radially outwards until we find that the
+    #whole boundary has chisq > chimin
+    #Always center on the best value:
+    startnorm1 = bestnorm1
+    startnorm2 = bestnorm2
+    points = 10
+
+    #Create masks for the outer boundary of the chi-square space:
+    edges1 = np.zeros([2*points+1,2*points+1], dtype=int)
+    edges2 = np.zeros([2*points+1,2*points+1], dtype=int)
+    edges1[:, 0] = 1
+    edges1[:, 2*points] = 1
+    edges2[0, :] = 1
+    edges2[2*points, :] = 1
+
+    #Create initial values for error bar search:
+    scaling = [0.1, 0.1]   #first guess
+    scaling0 = scaling
+    minscaling = scaling
+    goingup = [0,0]
+
+    print('Starting search for error contour.')
+
+    for i in range(maxcycles):
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+        self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      )
+
+      #First see if the contour is completely closed:
+      #Look for chisq < min_chisq + 1 on boundary:
+      w1 = np.where(edges1.astype(bool) and (chiarray <= chisquare + 1.))[0]
+      nw1 = w1.size
+      w2 = np.where(edges2.astype(bool) and (chiarray <= chisquare + 1.))[0]
+      nw2 = w2.size
+      nw=[nw1,nw2]
+
+      #If the boundary is entirely outside of the chi-square contour, zoom
+      #in by a factor of 2, unless you had already zoomed out, in which 
+      #case you've actually identified the right scale:
+      if (np.sum(nw) == 0):
+          if (np.sum(goingup) == 2):
+            break
+          for j in (0,1):
+            if (not goingup[j]):
+              scaling[j] /= 2.0
+          continue
+      
+      #If boundary not entirely clear, take each axis separately, and
+      #expand or contract the scaling:
+      for j in (0,1):
+        if (nw[j] > 0):
+          goingup[j] = 1
+          scaling[j] *= 2.0
+        else:
+          if (not goingup[j]):
+            scaling[j] /= 2.0
+
+      
+          #This is a useful diagnostic check on the contour changing algorithm:
+          #contour,chiarray,levels=[chisquare+1.,chisquare+3.,chisquare+20.]
+          print(i,startnorm1,startnorm2,bestnorm1,bestnorm2,scaling[0],scaling[1],bestchi)
+          #format='(i8,4f11.3,2f13.6,f13.4)'
+
+    #Now that we've found the appropriate scaling (within a factor
+    #of 2 of the point where the last good fit appears on the boundary), 
+    #do one very fine map of chisquare space to find the error bars:
+
+    points = 40
+
+    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+      self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+    )
+
+    #Pick out the subset of points within the min(chisquare)+1. contour:
+    w = np.where(chiarray LT chisquare + 1.)
+    nw = w.size
+    if (nw == 0):
+      print('Failure in finding error bars.')
+
+    #This makes up the last needed output parameter: ranges of the parameters
+    param_ranges = [
+      [np.min(norm1array[w]), np.max(norm1array[w])],
+      [np.min(norm2array[w]), np.max(norm2array[w])]
+    ]
+
+    return [params, param_ranges, modvals, secondmodvals, chisquare, dof]
+
   def _barrel_sp_fold_m4(self):
     return
   
