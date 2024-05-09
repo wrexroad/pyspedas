@@ -894,8 +894,8 @@ class SpecData:
         for i in range(foldvals1.size):
           y = [foldvals1[i], foldvals2[i], foldvals3[i]]
           x = [phmean[bin1], phmean[bin2], phmean[bin3]]
-          r = poly_fit(x,y,2)
-          foldvals[i] = r[0] + r[1]*parvector[j] + r[2]*np.pow(parvector[j],2)
+          r = np.polyfit(x,y,2)
+          foldvals[i] = r[2] + r[1]*parvector[j] + r[0]*np.pow(parvector[j],2)
         
       else:
         print('Only exponential or monoenergetic spectra are currently supported.')
