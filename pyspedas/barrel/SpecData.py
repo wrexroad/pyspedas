@@ -997,9 +997,9 @@ class SpecData:
       if (scaling[0] < 0.001 and scaling[1] < 0.001):
         break
 
-      if (np.abs(bestnorm1n) == points)
+      if (np.abs(bestnorm1n) == points):
         scaling[0] *= 2.0
-      if (np.abs(bestnorm2n) == points)
+      if (np.abs(bestnorm2n) == points):
         scaling[1] *= 2.0
 
       print(i,startnorm1,startnorm2,bestnorm1,bestnorm2,scaling[0],scaling[1],bestchi)
@@ -1093,7 +1093,7 @@ class SpecData:
     )
 
     #Pick out the subset of points within the min(chisquare)+1. contour:
-    w = np.where(chiarray LT chisquare + 1.)
+    w = np.where(chiarray < chisquare + 1.)[0]
     nw = w.size
     if (nw == 0):
       print('Failure in finding error bars.')
