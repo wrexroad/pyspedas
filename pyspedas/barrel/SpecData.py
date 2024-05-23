@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.interpolate import interp1d
 import json
 
 with open('./dbase.json', 'r') as f:
@@ -1480,9 +1481,9 @@ class SpecData:
 
     #Set up the vectors of values for parameters and normalizations:
     pts = 2*points + 1
-    normvector = [findgen(pts)-points]*scaling[0]/points*startnorm + startnorm
-    parvector  = [findgen(pts)-points]*scaling[1]/points*startpar + startpar
-    drmvector  = [findgen(pts)-points]*scaling[2]/points + startdrm
+    normvector = [np.arange(pts)-points]*scaling[0]/points*startnorm + startnorm
+    parvector  = [np.arange(pts)-points]*scaling[1]/points*startpar + startpar
+    drmvector  = [np.arange(pts)-points]*scaling[2]/points + startdrm
 
     #Rescale drm vector to omit unphysical regions (< 0, > 1):
     drmlow = np.where(drmvector < 0.)[0]
@@ -1545,3 +1546,71 @@ class SpecData:
       modvals = bestnorm*np.matmul(drmbest, (np.exp(-phmean/bestpar)*phwidth))
 
     return [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray]
+
+
+  def _barrel_read_model(self, model_file, phebins, phmean):
+    modeldata = np.loadtxt(model_file, delimiter=None)
+    n = modeldata.shape(0)
+    if (n < 3):
+      print('Error reading model file -- two few data points (< 3).')
+    
+    #Compare energy channels in file to requested ones, and interpolate
+    #new ones if they don't match:
+
+    model_ebins = np.concatenate([modeldata[:,0], np.array([modeldata[n-1,1]])])
+    if ( ( model_ebins.size != phebins.size ) or np.max(np.abs(model_ebins-phebins)) > 1.0 ):
+      [modelmean, gmean, modelwidth, edges_2, edges_1] = self._barrel_edge_products(model_ebins)
+      interp_func = interp1d(modelmean, modeldata[:,2], kind='linear', fill_value="extrapolate")
+      outspec = interp_func(phmean)
+
+      # Set places where extrapolation < 0 equal to zero:
+      outspec[np.where(outspec < 0.)[0]] = 0.
+      if (np.max(modelmean) < np.max(phmean)) or (np.min(modelmean) < np.min(phmean)):
+        print('BARREL_SP_READMODELSPEC: WARNING: extrapolating model beyond specified range in ', model_file)
+      else:
+        outspec = modeldata[:, 2]
+
+    return outspec
+
+  def _barrel_edge_products(self, edges, contiguous=False, epsilon=False):
+    #Set up defaults for degenerate case of single value
+    width = 0.0
+    mean = edges
+    gmean = edges
+    edges_2 = edges
+    edges_1 = edges
+    
+    if edges.size == 1:
+      return [mean, gmean, width, edges_2, edges_1]
+
+    dims = edges.shape #FIX THIS
+
+    if dims[0] == 2 and dims[1] == 2: 
+      n = dims[2]
+      edges_2 = edges
+      edges_1 = np.concatenate([edges_2[:,0][:], np.array([edges_2[n-1, 1]])])
+    else:
+      n = edges.size-1
+      edges_2 = np.transpose( [ [edges(0:n-1)],[edges(1:*)]]),2,n
+      edges_1 = edges
+    
+    #QUESTION
+    #Is 'contiguous' ever set?
+    if (contiguous):
+      diff = (f_div(edges[1:*]-edges,edges))
+      resistant_mean, diff, 2.0, av_diff
+
+      default, epsilon, av_diff gt 0 ? (av_diff*1e-5 > 1e-6) : 1e-5
+
+        edges_1 =get_uniq(edges, epsilon=epsilon) ;edges(uniq( edges, sort(edges)))
+        n = n_elements( edges_1 ) -1
+        edges_2 = transpose( [ [edges_1(0:n-1)],[edges_1(1:*)]])
+        endif
+
+    mean = total( edges_2,1 )/2.
+    gmean = ( ((edges_2(0,*)*edges_2(1,*))>0.0)^0.5 )(*)
+
+    width = abs(( edges_2(1,*)-edges_2(0,*) )(*))
+
+    end
+    return [mean, gmean, width, edges_2, edges_1]
