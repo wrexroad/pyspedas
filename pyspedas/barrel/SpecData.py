@@ -1588,29 +1588,31 @@ class SpecData:
     if dims[0] == 2 and dims[1] == 2: 
       n = dims[2]
       edges_2 = edges
-      edges_1 = np.concatenate([edges_2[:,0][:], np.array([edges_2[n-1, 1]])])
+      edges_1 = np.concatenate([edges_2[:,0], np.array([edges_2[n-1, 1]])])
     else:
       n = edges.size-1
-      edges_2 = np.transpose( [ [edges(0:n-1)],[edges(1:*)]]),2,n
+      edges_2 = np.transpose(np.vstack((edges.flatten()[0:n],edges.flatten()[1:])))
       edges_1 = edges
     
     #QUESTION
     #Is 'contiguous' ever set?
-    if (contiguous):
-      diff = (f_div(edges[1:*]-edges,edges))
-      resistant_mean, diff, 2.0, av_diff
+    #if (contiguous):
+    #  diff = (f_div(edges[1:*]-edges,edges))
+    #  resistant_mean, diff, 2.0, av_diff
+    #
+    #  default, epsilon, av_diff gt 0 ? (av_diff*1e-5 > 1e-6) : 1e-5
+    #
+    #    edges_1 =get_uniq(edges, epsilon=epsilon) ;edges(uniq( edges, sort(edges)))
+    #    n = n_elements( edges_1 ) -1
+    #    edges_2 = transpose( [ [edges_1(0:n-1)],[edges_1(1:*)]])
+    #    endif
 
-      default, epsilon, av_diff gt 0 ? (av_diff*1e-5 > 1e-6) : 1e-5
+    mean = np.sum(edges, axis=1)/2
+    
+    gmean = edges_2[:, 0]*edges_2[:, 1]
+    gmean[gmean < 0] = 0
+    gmean = np.sqrt(gmean)
 
-        edges_1 =get_uniq(edges, epsilon=epsilon) ;edges(uniq( edges, sort(edges)))
-        n = n_elements( edges_1 ) -1
-        edges_2 = transpose( [ [edges_1(0:n-1)],[edges_1(1:*)]])
-        endif
+    width = np.abs(edges_2[:,1]-edges_2[:,0])
 
-    mean = total( edges_2,1 )/2.
-    gmean = ( ((edges_2(0,*)*edges_2(1,*))>0.0)^0.5 )(*)
-
-    width = abs(( edges_2(1,*)-edges_2(0,*) )(*))
-
-    end
     return [mean, gmean, width, edges_2, edges_1]
