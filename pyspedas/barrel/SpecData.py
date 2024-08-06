@@ -479,12 +479,12 @@ class SpecData:
       renorm = src_spec[w].sum() / bkg_spec[w].sum()
       print("Background renormalization factor: {}".format(renorm))
       
-    bkg_spec = self.bkg_spec * renorm
-    subspec = self.src_spec - self.bkg_spec
-    subspec_err = np.sqrt(np.power(self.src_spec_err, 2) + np.power((self.bkg_spec_err * renorm), 2) )
+    self.bkg_spec = self.bkg_spec * renorm
+    self.subspec = self.src_spec - self.bkg_spec
+    self.subspec_err = np.sqrt(np.power(self.src_spec_err, 2) + np.power((self.bkg_spec_err * renorm), 2) )
     print("Total count rate:      {} c/s".format((self.src_spec*ctwidth).sum()))
     print("Background count rate: {} c/s".format((self.bkg_spec*ctwidth).sum()))
-    print("Net count rate:        {} c/s".format((subspec*ctwidth).sum()))
+    print("Net count rate:        {} c/s".format((self.subspec*ctwidth).sum()))
     
     #plot the data points: MOVE TO NOTEBOOK
     #window,xsize=500,ysize=800
@@ -506,25 +506,17 @@ class SpecData:
     
     #Do the actual fitting according to the chosen method:
     if method == 1:
-      self._barrel_sp_fold_m1(
-        elmean, elwidth, ctwidth, ctmean, usebins, maxcycles,
-        params, param_ranges, modvals, chisquare, dof
-      )
+      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m1(
+        elmean, elwidth, ctwidth, ctmean, usebins, maxcycles)
     elif method == 2:
-      self._barrel_sp_fold_m2(
-        subspec, subspecerr, modlfile, ss.drm, ss.elebins, elmean, elwidth, ctwidth, usebins, maxcycles,
-        params, param_ranges, modvals, chisquare, dof
-      )
+      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m2(
+        elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 3:
-      self._barrel_sp_fold_m3(
-        subspec, subspecerr, modlfile, secondmodlfile, ss.drm, ss.elebins, elmean, elwidth, ctwidth, usebins, maxcycles,
-        params, param_ranges, modvals, secondmodvals, chisquare, dof
-      )
+      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m3(
+        secondmodlfile, elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 4:
-      self._barrel_sp_fold_m4(
-        subspec, subspecerr, model, ss.drm, ss.drm2, elmean, elwidth, ctwidth, usebins, maxcycles,
-        params, param_ranges, modvals, chisquare, dof
-      )
+      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m4(
+        elmean, elwidth, ctwidth, usebins, maxcycles)
 
 
     #THESE SHOULD ALREADY BE SET 
@@ -979,7 +971,7 @@ class SpecData:
 
     #Iterate the fit, adjusting the scale dynamically:
     for i in range(maxcycles):
-      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
         self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
       )
 
@@ -1044,7 +1036,7 @@ class SpecData:
     print('Starting search for error contour.')
 
     for i in range(maxcycles):
-      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
         self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
       )
 
@@ -1089,7 +1081,7 @@ class SpecData:
 
     points = 40
 
-    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = _barrel_sp_fitgrid3(
+    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
       self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
     )
 
