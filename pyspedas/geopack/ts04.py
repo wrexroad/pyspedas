@@ -18,21 +18,24 @@ def tts04(pos_var_gsm, parmod=None, suffix=''):
 
     Parameters
     -----------
-        parmod: ndarray
-            10-element array (vs. time):
+        parmod: str
+            A tplot variable containing the model parameters as a 10-element array (vs. time).  The timestamps should match the times in the input position
+            variable. The motdl::
+
                 (1) solar wind pressure pdyn (nanopascals),
                 (2) dst (nanotesla),
                 (3) byimf,
                 (4) bzimf (nanotesla)
                 (5-10) indices w1 - w6, calculated as time integrals from the beginning of a storm
-                    see the reference (3) below, for a detailed definition of those variables
 
         suffix: str
             Suffix to append to the tplot output variable
 
     Returns
     --------
-        Name of the tplot variable containing the model data
+        str
+            Name of the tplot variable containing the model data
+
     """
     pos_data = get_data(pos_var_gsm)
 

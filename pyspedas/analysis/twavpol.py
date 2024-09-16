@@ -82,13 +82,6 @@ except ImportError:
     nansum = np.nansum
 from pytplot import get_data, store_data, options, tnames
 
-# these routines require numpy v1.20.0 or later
-if np.__version__ < '1.20':
-    logging.error('Error: numpy 1.20.0 or later is required for wave polarization calculations. ')
-    logging.error('Please update numpy with: pip install numpy --upgrade')
-    breakpoint()
-
-
 def atan2c(zx, zy):
     """Define arctan2 with complex numbers."""
     if np.isreal(zx) and np.isreal(zy):
@@ -118,7 +111,7 @@ def wpol_matsqrd(i1, i2, i3, ematspec):
 def wpol_helicity(nosteps, nopfft, KK, ematspec, waveangle):
     """Calculate helicity, ellipticity."""
     # Avoid warnings.
-    warnings.simplefilter("ignore", np.ComplexWarning)
+    warnings.simplefilter("ignore", np.exceptions.ComplexWarning)
 
     # Define arrays.
     helicity = np.empty((nosteps, int(nopfft/2), 3))
