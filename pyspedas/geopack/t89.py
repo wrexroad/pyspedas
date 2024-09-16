@@ -7,7 +7,7 @@ from geopack import geopack, t89
 def tt89(pos_var_gsm, iopt=3, suffix='', igrf_only=False):
     """
     tplot wrapper for the functional interface to Sheng Tian's implementation 
-    of the Tsyganenko 96 and IGRF model:
+    of the Tsyganenko T89 and IGRF model:
 
     https://github.com/tsssss/geopack
 
@@ -20,16 +20,19 @@ def tt89(pos_var_gsm, iopt=3, suffix='', igrf_only=False):
     -----------
         iopt: int
             Specifies the ground disturbance level:
+
+                =========  ======== =======  =======  =======  =======  =======
                 iopt= 1       2        3        4        5        6      7
-                           correspond to:
                 kp=  0,0+  1-,1,1+  2-,2,2+  3-,3,3+  4-,4,4+  5-,5,5+  &gt =6-
+                =========  ======== =======  =======  =======  =======  =======
 
         suffix: str
             Suffix to append to the tplot output variable
 
     Returns
     --------
-        Name of the tplot variable containing the model data
+        str
+            Name of the tplot variable containing the model data
     """
     pos_data = get_data(pos_var_gsm)
 

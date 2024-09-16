@@ -38,9 +38,9 @@ def load_leap_table(reload=False):
                               remote_file='CDFLeapSeconds.txt',
                               local_path=table_dir)
 
-    cols = ['Year', 'Month', 'Day', 'LS', 'Drift']
+    cols = ['Year', 'Month', 'Day', 'LS', 'Drift1','Drift2']
     table = pd.read_csv(table_file,
-                        delim_whitespace=True,
+                        sep=r'\s+',
                         dtype=str,
                         names=cols,
                         comment=';',

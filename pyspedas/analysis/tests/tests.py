@@ -1,14 +1,15 @@
 """Automated tests for the analysis functions."""
 
 import unittest
+import pyspedas
 from pytplot import smooth
 from pyspedas import (subtract_average, subtract_median, tsmooth, avg_data,
                       yclip, time_clip, deriv_data, tdeflag, clean_spikes,
-                      tinterpol)
+                      tinterpol, tvectot, wavelet, time_domain_filter)
 from pytplot import tcrossp
 from pytplot import tdotp
 from pytplot import tnormalize
-from pytplot import get_data, store_data, replace_data
+from pytplot import get_data, store_data, replace_data, time_string, time_float, data_exists
 
 import numpy as np
 
@@ -70,13 +71,13 @@ class AnalysisTestCases(BaseTestCase):
               [23., 15., 28.], [15., 20., float('nan')]]
         store_data('test1', data={'x': [1., 2., 3., 4., 5., 6.], 'y': dn})
         subtract_median('aaabbbcc')
-        subtract_median('test1', new_names='aabb')
+        subtract_median('test1', newname='aabb')
         d = get_data('aabb')
         self.assertTrue(len(d[1]) == 6)
-        subtract_median(['test', 'aabb'], new_names='aaabbb')
-        subtract_median('test1', overwrite=1)
-        subtract_average('test', new_names="testtest")
-        subtract_average(['test-m', 'test'], new_names="testtest2")
+        subtract_median(['test', 'aabb'], newname='aaabbb')
+        subtract_median('test1', overwrite=True)
+        subtract_average('test', newname="testtest")
+        subtract_average(['test-m', 'test'], newname="testtest2")
 
     def test_subtract_average(self):
         """Test subtract_average."""
@@ -85,16 +86,22 @@ class AnalysisTestCases(BaseTestCase):
         d = get_data('test-d')
         self.assertTrue((np.round(d[1].tolist()) == [-6., -4., -1.,
                          6., 11., -8.]).all())
+        # Test with integer data
+        # int_data=[1,2,3,4,5,6]
+        # store_data('test-int',data={'x':d[0],'y':int_data})
+        # subtract_average('test-int')
+        # d=get_data('test-int-d')
+        #self.assertEqual(d.y[0],-2.5)
         dn = [[3., 5., 8.], [15., 20., 1.], [3., 5., 8.], [15., 20., 1.],
               [23., 15., 28.], [15., 20., float('nan')]]
         store_data('test1', data={'x': [1., 2., 3., 4., 5., 6.], 'y': dn})
         subtract_average('aaabbbcc')
-        subtract_average('test1', new_names='aabb')
+        subtract_average('test1', newname='aabb')
         d = get_data('aabb')
-        subtract_average(['test', 'aabb'], new_names='aaabbb')
-        subtract_average('test1', overwrite=1)
-        subtract_average('test1', new_names="testtest")
-        subtract_average(['test1', 'test'], new_names="testtest2")
+        subtract_average(['test', 'aabb'], newname='aaabbb')
+        subtract_average('test1', overwrite=True)
+        subtract_average('test1', newname="testtest")
+        subtract_average(['test1', 'test'], newname="testtest2")
         self.assertTrue(len(d[1]) == 6)
 
     def test_yclip(self):
@@ -105,11 +112,11 @@ class AnalysisTestCases(BaseTestCase):
         d = get_data('test-clip')
         # Replace nan with -99.0
         dd = np.nan_to_num(d[1], nan=-99.)
-        yclip('test', 0.0, 12.0, new_names='name-clip')
-        yclip(['test', 'name-clip'], 0.0, 12.0, new_names='name1-clip')
-        yclip('test', 0.0, 12.0, overwrite=1)
-        yclip('test', 0.0, 12.0, new_names="testtest")
-        yclip(['test', 'test-clip'], 0.0, 12.0, new_names="testtest2")
+        yclip('test', 0.0, 12.0, newname='name-clip')
+        yclip(['test', 'name-clip'], 0.0, 12.0, newname='name1-clip')
+        yclip('test', 0.0, 12.0, overwrite=True)
+        yclip('test', 0.0, 12.0, newname="testtest")
+        yclip(['test', 'test-clip'], 0.0, 12.0, newname="testtest2")
         self.assertTrue((dd == [3., 5., 8., -99., -99., 1.]).all())
 
     def test_timeclip(self):
@@ -123,13 +130,13 @@ class AnalysisTestCases(BaseTestCase):
         time_clip('test1', 1577112800, 1577608800)
         d = get_data('test1-tclip')
         dd = d[1]
-        time_clip('test', 1577308800, 1577598800, new_names='name-clip')
+        time_clip('test', 1577308800, 1577598800, newname='name-clip')
         time_clip(['test', 'name-clip'], 1577308800, 1577598800,
-                  new_names='name1-ci')
-        time_clip('test', 1577308800, 1577598800, overwrite=1)
-        time_clip('test', 1577308800, 1577598800, new_names="testtest")
+                  newname='name1-ci')
+        time_clip('test', 1577308800, 1577598800, overwrite=True)
+        time_clip('test', 1577308800, 1577598800, newname="testtest")
         time_clip(['test', 'test1'], 1577308800, 1577598800,
-                  new_names="testtest2")
+                  newname="testtest2")
         time_clip('test1', 1677112800, 1577608800)
         self.assertTrue((dd == [3., 5., 8., 15.]).all())
 
@@ -142,17 +149,17 @@ class AnalysisTestCases(BaseTestCase):
         avg_data('test', width=2, overwrite=True)  # Test overwrite
         store_data('test', data={'x': [1., 2., 3., 4., 5., 6.],
                                  'y': [3., 5., 8., -4., 20., 1.]})
-        avg_data('test', width=2, new_names='aabb')  # Test new_names
+        avg_data('test', width=2, newname='aabb')  # Test new_names
         d = get_data('aabb')
         # Test multiple names
-        avg_data(['test', 'aabb'], new_names='aaabbb', width=2)
+        avg_data(['test', 'aabb'], newname='aaabbb', width=2)
         dt = [1., 12., 13., 14., 15., 16.]
         dn = [[3., 5., 8.], [15., 20., 1.], [3., 5., 8.], [15., 20., 1.],
               [23., 15., 28.], [15., 20., 1.]]
         dv = dn
         store_data('test1', data={'x': dt, 'y': dn, 'v': dv})
         avg_data('test1', width=2)  # Test 3-d data
-        avg_data('test1', new_names='test2', res=2.)  # Test a reasonable resolution
+        avg_data('test1', newname='test2', res=2.)  # Test a reasonable resolution
         avg_data('test1', res=-1.)  # Test res error
         avg_data('test1', res=1.e8)  # Test res error
         d2 = get_data('test2')
@@ -172,9 +179,9 @@ class AnalysisTestCases(BaseTestCase):
         store_data('test1', data={'x': [1., 2., 3., 4., 5., 6.], 'y': dn})
         clean_spikes('test1', nsmooth=3)
         d2 = get_data('test1-despike')
-        clean_spikes('test', new_names='test_desp', nsmooth=3, sub_avg=True)
-        clean_spikes(['test', 'test1'], new_names='test1-desp')
-        clean_spikes('test1', overwrite=1)
+        clean_spikes('test', newname='test_desp', nsmooth=3, sub_avg=True)
+        clean_spikes(['test', 'test1'], newname='test1-desp')
+        clean_spikes('test1', overwrite=True)
         self.assertTrue(len(d2[1]) == 6)
 
     def test_tdeflag(self):
@@ -185,9 +192,9 @@ class AnalysisTestCases(BaseTestCase):
         replace_data('test', dn)
         tdeflag('test')
         d = get_data('test-deflag')
-        tdeflag('test', overwrite=1)
-        tdeflag('test', new_names="testtest")
-        tdeflag(['test', 'test-deflag'], new_names="testtest2")
+        tdeflag('test', overwrite=True)
+        tdeflag('test', newname="testtest")
+        tdeflag(['test', 'test-deflag'], newname="testtest2")
         # Length should be two less, because NaNs were removed.
         self.assertTrue(len(d[1]) == len_dn - 2)
 
@@ -196,10 +203,56 @@ class AnalysisTestCases(BaseTestCase):
         deriv_data('aaabbbccc')  # Test non-existent name
         deriv_data('test')
         d = get_data('test-der')
-        deriv_data('test', overwrite=1)
-        deriv_data('test', new_names="testtest")
-        deriv_data(['test', 'test-der'], new_names="testtest2")
+        deriv_data('test', overwrite=True)
+        deriv_data('test', newname="testtest")
+        deriv_data(['test', 'test-der'], newname="testtest2")
         self.assertTrue((d[1] == [2., 2.5, 5.,   6., -7., -19.]).all())
+
+    def test_tvectot(self):
+        from pyspedas.projects.themis import state
+        from pytplot import data_exists
+        state(probe='a')
+        tvectot('tha_pos', join_component=True)
+        self.assertTrue(data_exists('tha_pos_tot'))
+        d = get_data('tha_pos_tot')
+        s = d.y.shape[1]
+        self.assertEqual(s,4)
+        tvectot('tha_pos',newname='tha_pos_total')
+        self.assertTrue(data_exists('tha_pos_total'))
+        tvectot('tha_pos',suffix='_rtot')
+        self.assertTrue(data_exists('tha_pos_rtot'))
+
+    def test_wavelet(self):
+        # Create a tplot variable that contains a wave.
+        t = np.arange(4000.)
+        y = np.sin(2*np.pi*t/32.)
+        y2 = np.sin(2*np.pi*t/64.)
+        y[1000:3000] = y2[1000:3000]
+        var = 'sin_wav'
+        time = time_float('2010-01-01') + 10*t
+        store_data(var, data={'x':time, 'y':y})
+
+        # Gaussian Derivative wavelets transformation.
+        powervar = wavelet(var, wavename='gaus1')
+        pvar = powervar[0]
+        self.assertTrue(data_exists(pvar))
+
+    def test_time_domain_filter(self):
+        # Create a tplot variable that contains a wave.
+        t = np.arange(4000.)
+        y = np.sin(2*np.pi*t/32.)
+        y2 = np.sin(2*np.pi*t/64.)
+        y[1000:3000] = y2[1000:3000]
+        dat = np.zeros((4000,3))
+        dat[:,0] = y
+        dat[:,1] = y
+        dat[:,2] = y
+        var = 'sin_wav'
+        time = time_float('2010-01-01') + 10*t
+        output = time_domain_filter(dat,time,16.0, 48.0)
+        self.assertEqual(output.shape[0], dat.shape[0])
+        self.assertEqual(output.shape[1], dat.shape[1])
+
 
     def test_tsmooth(self):
         """Test smooth."""
@@ -209,16 +262,16 @@ class AnalysisTestCases(BaseTestCase):
         r = [1.0, 1.3333333333333333, 2.0, 3.0, 2.6666666666666665,
              3.0, 2.6666666666666665, 3.0, 2.0, 1.3333333333333333, 1.0]
         self.assertTrue(x == r)
-        b = [1.0, 1.0, 2.0, 3.0, np.NaN, np.NaN, np.NaN, np.NaN, 2.0, 1.0, 1.0]
+        b = [1.0, 1.0, 2.0, 3.0, np.nan, np.nan, np.nan, np.nan, 2.0, 1.0, 1.0]
         y = smooth(b, width=3)
         ry = [1.0, 1.3333333333333333, 2.0, 1.6666666666666665, 1.0,
               np.nan, np.nan, 0.6666666666666666, 1.0, 1.3333333333333333, 1.0]
         self.assertTrue(y == ry)
         tsmooth('test')
         d = get_data('test-s')
-        tsmooth('test', overwrite=1)
-        tsmooth('test', new_names="testtest")
-        tsmooth(['test', 'test-s'], new_names="testtest2")
+        tsmooth('test', overwrite=True)
+        tsmooth('test', newname="testtest")
+        tsmooth(['test', 'test-s'], newname="testtest2")
         self.assertTrue(d[1].tolist() == [3.,  5.,  8., 15., 20.,  1.])
 
     def test_tinterpol(self):
@@ -236,10 +289,138 @@ class AnalysisTestCases(BaseTestCase):
         tinterpol('test1', 'test')
         tinterpol('test1', 'doesnt_exist')
         tinterpol('test2', 'test', newname='')
-        tinterpol('test2', [1, 2, 3, 4, 5, 6])
+        tinterpol('test2', [1, 2, 3, 4, 5, 6], newname='pyarray_float')
+        tinterpol('test2', np.array([1, 2, 3, 4, 5, 6]), newname='nparray_float')
+        tinterpol('test2', time_string([1,2,3,4,5,6]), newname='pyarray_str')
+        tinterpol('test2', np.array(time_string([1,2,3,4,5,6])), newname='nparray_str')
+        bad_datatype = {}
+        tinterpol('test2', [bad_datatype], newname='nparray_bad_datatype')
+
         d = get_data('test1-itrp')
         self.assertTrue(d[1][1] == 20.)
+        d2 = get_data('pyarray_float')
+        self.assertTrue(abs(d2[1][1][0] - 5.80645161) < 1e-6)
+        d3 = get_data('nparray_float')
+        self.assertTrue(abs(d3[1][1][0] - 5.80645161) < 1e-6)
+        d4 = get_data('pyarray_str')
+        self.assertTrue(abs(d3[1][1][0] - 5.80645161) < 1e-6)
+        d5 = get_data('nparray_str')
+        self.assertTrue(abs(d3[1][1][0] - 5.80645161) < 1e-6)
 
+    def test_scipy_interp1d(self):
+        import scipy
+        import numpy as np
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array(input_times_npdt64[1])
+
+        input_times_float64 = input_times_npdt64.astype(np.float64)
+        interp_to_time_float64 = interp_to_times_npdt64.astype(np.float64)
+
+        interpolator = scipy.interpolate.interp1d(input_times_float64, values_input, kind='linear')
+        result=interpolator(interp_to_time_float64)
+        print(result)
+        # Known to fail.  This affects xarray.interp and the current version of tinterpol.
+        #self.assertTrue((result >= 0.0).all())
+
+    def test_scipy_spline(self):
+        import scipy
+        import numpy as np
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array(input_times_npdt64[1])
+
+        input_times_float64 = input_times_npdt64.astype(np.float64)
+        interp_to_time_float64 = interp_to_times_npdt64.astype(np.float64)
+
+        interpolator = scipy.interpolate.make_interp_spline(input_times_float64, values_input, k=1)
+        result=interpolator(interp_to_time_float64)
+        print(result)
+        # make_interp_spline() with k=1 gives the expected result
+        self.assertTrue((result >= 0.0).all())
+
+    def test_xarray_interp(self):
+        import xarray as xr
+        import numpy as np
+
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array(input_times_npdt64[1])
+
+        data_array = xr.DataArray(values_input,dims=['time'],coords={'time':('time',input_times_npdt64)})
+
+        result = data_array.interp({"time": interp_to_times_npdt64},method='linear')
+        # This is known to fail, due to issues in scipy.interpolate.interp1d
+        print(result.values)
+        # result.values is [-3.469446951953614e-18]
+        #self.assertTrue((result.values >= 0.0).all())
+
+    def test_xarray_interp_float_times(self):
+        import xarray as xr
+        import numpy as np
+
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array(input_times_npdt64[1])
+
+        input_times_float64 = input_times_npdt64.astype(np.float64)
+        interp_to_time_float64 = interp_to_times_npdt64.astype(np.float64)
+
+        data_array = xr.DataArray(values_input,dims=['time'],coords={'time':('time',input_times_float64)})
+
+        result = data_array.interp({"time": interp_to_time_float64},method='linear')
+        # This is known to fail, due to issues in scipy.interpolate.interp1d
+        print(result.values)
+        # result.values is [-3.469446951953614e-18]
+        #self.assertTrue((result.values >= 0.0).all())
+
+    def test_numpy_interp(self):
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+
+        time_strings_interp_to = np.array(['2018-07-01T13:02:16.922475008'])
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_interp_to])
+        input_times_float64 = input_times_npdt64.astype(np.float64)
+        interp_to_time_float64 = interp_to_times_npdt64.astype(np.float64)
+        result=np.interp(interp_to_time_float64,input_times_float64,values_input)
+        # This works, unlike scipy and xarray!
+        self.assertTrue((result >= 0.0).all())
+
+
+    def test_tinterpol_nonnegative2(self):
+        time_strings_input = np.array(['2018-07-01T13:02:16.892474880',
+                                       '2018-07-01T13:02:16.922475008',
+                                       '2018-07-01T13:02:16.952474880'])
+        values_input = np.array([0.028584518, 0., 0.013626526],dtype=np.float32)
+        time_strings_interp_to = np.array(['2018-07-01T13:02:16.922475008'])
+        input_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_input])
+        interp_to_times_npdt64 = np.array([np.datetime64(t) for t in time_strings_interp_to])
+        store_data('interp_input', data={'x':input_times_npdt64, 'y':values_input})
+        store_data('interp_to', data={'x':interp_to_times_npdt64, 'y':[0.0]})
+        tinterpol('interp_input', 'interp_to', newname='interp_result')
+        result=get_data('interp_result')
+        # This is known to fail, apparently due to limitations of scipy.interpolate.interp1d which are
+        # unlikely to ever be fixed. See tests above for xarray.interp and scipy
+        # self.assertTrue((result.y >= 0.0).all())
 
 if __name__ == '__main__':
     unittest.main()
