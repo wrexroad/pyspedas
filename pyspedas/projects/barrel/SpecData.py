@@ -7,47 +7,53 @@ with open('./dbase.json', 'r') as f:
   for key,value in dbase.items():
     dbase[key] = np.array(value)
 
-class SpecData:   
-  def __init__(self, payload, background_intervals=[], event_intervals=[], is_slow=True):
-    self.payload = payload
-    self.background_intervals = background_intervals 
-    self.event_intervals= event_intervals
-    self.is_slow = is_slow
-    self.size = 256 if self.is_slow else 48
-    self.altitude = -1 
-    self.maglat = -1
-    self.bkg_method = -1                                              #1 =from data stream, 2 =from model
-    self.src_spec = np.ones(self.size, dtype="float") * -1            #summed source spectrum, deadtime corrected       
-    self.src_spec_err = np.ones(self.size, dtype="float") * -1         #error in summed source spectrum
-    self.bkg_spec = np.ones(self.size, dtype="float") * -1            #summed background spectrum, deadtime corrected        
-    self.bkg_spec_err = np.ones(self.size, dtype="float") * -1        #error in summed background spectrum
-    self.src_time = -1                                                #source spectrum accum. time in seconds
-    self.bkg_time = -1                                                #background spectrum accum. time in seconds
-    self.src_live = -1                                                #source spectrum livetime, seconds (approx.)
-    self.bkg_live = -1                                                #background spectrum livetime, seconds (approx.)
-    self.bkg_renorm = -1                                              #switch to renormalize bkg to match source > 3 MeV
-    self.subspec = np.ones(self.size) * -1                            #background subtracted spectrum, deadtime corrected
-    self.subspec_err = np.ones(self.size) * -1                        #error in background subtracted spectrum
-    self.drm_size = 256 if self.is_slow else 184                      #number of drm rows (electron side)
-    self.e_bins = np.ones(self.size + 1, dtype="float") * -1          #energy channel boundaries (keV)
-    self.ele_bins = np.ones(self.drm_size + 1, dtype="float")-1       #energy boundaries on electron side (ct side is fixed)
-    self.drm = np.ones((self.size, self.drm_size), dtype="float")     #response matrix
-    self.drm_type = -1                                                #1 =downward isotropic, 2 =mirroring, 3 =other
-    self.drm2 = np.ones((self.size, self.drm_size), dtype="float")*-1 #second response matrix 
-    self.drm2_type = -1                                               #1 =downward isotropic, 2 =mirroring, 3 =other
-    self.method = -1                                                  #fitting method (1-6)
-    self.model = -1                                                   #fitting model (1-2)  = exponential, monoenergetic
-    self.fitrange = np.ones(2, dtype="float") * -1                    #fitting range of energies
-    self.numparams = -1                                               #number of fit parameters
-    self.params = np.ones(10, dtype="float") * -1                     #fit parameters
-    self.param_ranges = np.ones([10,2], dtype="float") * -1             #1-sigma ranges on fit parameters
-    self.chisq = -1                                                   #chi-square of fit (unreduced)
-    self.chi_dof = -1                                                 #degrees of freedom for chi-square of fit
-    self.modvals = np.ones(self.size, dtype="float") * -1             #values of model fit at center of each bin
-    self.secondmodvals = np.ones(self.size, dtype="float") * -1       #values of 2nd component at center of each bin 
-    self.ebins = self._make_standard_energies()
-    self.elebins = self._make_standard_electron_energies()
-
+class SpecData:
+  @staticmethod
+  def barrel_sp_make(payload=None, num_src=1, num_bkg=1, is_slow=False):
+    size = 256 if is_slow else 48
+    drm_size = 256 if is_slow else 184
+    
+    return {
+      'payload': payload,                                   # Two-character payload ID (e.g. 1F)
+      'req_date': "",                                       # Requested start time
+      'req_duration': "",                                   # Requested duration in hours
+      'num_src': num_src,                                   # of source spectrum time intervals (default 1)
+      'num_bkg': num_bkg,                                   # of background spectrum time intervals (default 1) 
+      'is_slow': is_slow,                                   # slow spectrum (256 bins) or medium spectrum (48 bins) 
+      'size': size,                                         # number of bins in spectrum 
+      'altitude': -1,                                       # altitude in km
+      'maglat': -1,                                         # magnetic latitude in degrees
+      'bkg_method': -1,                                     # 1 = from data stream, 2 =from model
+      'src_spec': np.ones(size, dtype="float") * -1,        # summed source spectrum, deadtime corrected       
+      'src_spec_err': np.ones(size, dtype="float") * -1,    # error in summed source spectrum
+      'bkg_spec': np.ones(size, dtype="float") * -1,        # summed background spectrum, deadtime corrected        
+      'bkg_spec_err': np.ones(size, dtype="float") * -1,    # error in summed background spectrum
+      'src_time': -1,                                       # source spectrum accum. time in seconds
+      'bkg_time': -1,                                       # background spectrum accum. time in seconds
+      'src_live': -1,                                       # source spectrum livetime, seconds (approx.)
+      'bkg_live': -1,                                       # background spectrum livetime, seconds (approx.)
+      'bkg_renorm': -1,                                     # switch to renormalize bkg to match source > 3 MeV
+      'subspec': np.ones(size) * -1,                        # background subtracted spectrum, deadtime corrected
+      'subspec_err': np.ones(size) * -1,                    # error in background subtracted spectrum
+      'drm_size': drm_size,                                 # number of drm rows (electron side)
+      'e_bins': SpecData._make_standard_energies(is_slow),      # energy channel boundaries (keV)
+      'ele_bins': SpecData._make_standard_electron_energies(is_slow),   # energy boundaries on electron side (ct side is fixed)
+      'drm': np.ones((size, drm_size), dtype="float"),      # response matrix
+      'drm_type': -1,                                       # 1 =downward isotropic, 2 =mirroring, 3 =other
+      'drm2': np.ones((size, drm_size), dtype="float")*-1,  # second response matrix 
+      'drm2_type': -1,                                      # 1 =downward isotropic, 2 =mirroring, 3 =other
+      'method': -1,                                         # fitting method (1-6)
+      'model': -1,                                          # fitting model (1-2)  = exponential, monoenergetic
+      'fitrange': np.ones(2, dtype="float") * -1,           # fitting range of energies
+      'numparams': -1,                                      # number of fit parameters
+      'params': np.ones(10, dtype="float") * -1,            # fit parameters
+      'param_ranges': np.ones([10,2], dtype="float") * -1,  # 1-sigma ranges on fit parameters
+      'chisq': -1,                                          # chi-square of fit (unreduced)
+      'chi_dof': -1,                                        # degrees of freedom for chi-square of fit
+      'modvals': np.ones(size, dtype="float") * -1,         # values of model fit at center of each bin
+      'secondmodvals': np.ones(size, dtype="float") * -1   # values of 2nd component at center of each bin 
+  } 
+    
   @staticmethod
   def edge_products(edges):
 
@@ -154,15 +160,16 @@ class SpecData:
       f[w[0]:] = 0
     return f
 
-  def _make_standard_energies(self):
-    d = SpecData.calib_sspc if self.is_slow else SpecData.calib_mspc
+  def _make_standard_energies(is_slow):
+    d = SpecData.calib_sspc if is_slow else SpecData.calib_mspc
     return d[:,1]
   
-  def _make_standard_electron_energies(self):
+  @staticmethod
+  def _make_standard_electron_energies(is_slow):
     #get sspc standard energies
-    e0 = self._make_standard_energies()
+    e0 = SpecData._make_standard_energies(is_slow)
     
-    if self.is_slow:
+    if is_slow:
       e = e0
     else:
       #if we are using mspc, we need to interpolate 
@@ -181,13 +188,16 @@ class SpecData:
       e[e.size-40:e.size] = [num*100 for num in range(1,41)] + e0[max_index]
     return e
 
-  def _get_altitude(self):
+  @staticmethod
+  def _get_altitude(ss):
     return
   
-  def _get_maglat(self):
+  @staticmethod
+  def _get_maglat(ss):
     return
 
-  def _barrel_sp_drm_interp(self, altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
+  @staticmethod
+  def _barrel_sp_drm_interp(altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
     #loginterpolate = 1 : logarithmic interpolation
 
     if (pitch != "iso" and pitch != "mir"):
@@ -288,17 +298,17 @@ class SpecData:
 
     return a
   
-  def _barrel_sp_drm_row(self, ein, ctbins, pitch="iso"):
+  def _barrel_sp_drm_row(ss, ein, ctbins, pitch="iso"):
     if pitch != 'iso' and pitch != 'mir':
       raise ValueError('Illegal distribution name.  Use iso or mir.')
     
-    if self.altitude < 25:
+    if ss.altitude < 25:
       print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude < 25 km, being set to 25 km.")
-      self.altitude = 25
+      ss.altitude = 25
 
-    if self.altitude > 40:
+    if ss.altitude > 40:
       print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude > 40 km, being set to 40 km.")
-      self.altitude = 40
+      ss.altitude = 40
   
     al = np.array([25, 30, 35, 40])
 
@@ -306,19 +316,19 @@ class SpecData:
       return np.zeros(ctbins.size-1)
 
     for i in np.arange(2):
-      if (self.altitude == al[i]) or (self.altitude == 40):
-        sp = self._barrel_sp_drm_interp(self.altitude, ein, True, pitch)
+      if (ss.altitude == al[i]) or (ss.altitude == 40):
+        sp = SpecData._barrel_sp_drm_interp(ss.altitude, ein, True, pitch)
         if (sp.size == 1): print("Energy out of range.")
       else:
-        if (self.altitude > al[i]) and (self.altitude < al[i+1]):
-          sp1 = self._barrel_sp_drm_interp(al[i], ein, True, pitch)
-          sp2 = self._barrel_sp_drm_interp(al[i+1], ein, True, pitch)
+        if (ss.altitude > al[i]) and (ss.altitude < al[i+1]):
+          sp1 = SpecData._barrel_sp_drm_interp(al[i], ein, True, pitch)
+          sp2 = SpecData._barrel_sp_drm_interp(al[i+1], ein, True, pitch)
           n1 = sp1.size
           n2 = sp2.size
           if (sp1.size == 1): print("Energy out of range.")
           
           de = sp2[:, 0]-sp1[:, 0]
-          ga = (self.altitude - al[i])/5.
+          ga = (ss.altitude - al[i])/5.
           sp = np.zeros([sp2[:, 1].size, 2])
           sp[:, 0] = sp2[:, 0]
           sp[:, 1] = sp1[:, 1] + ga*(sp2[:, 1] - sp1[:, 1])
@@ -328,7 +338,7 @@ class SpecData:
 #            plot,sp1[:, 0],sp1[:, 1],/xlog,/ylog,xrange=[10,10000],$
 #              yrange=[0.01,10000],psym=5,symsize=0.5,$
 #              xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev',$
-#              title='Altitude: '+strtrim(self.altitude,2)+' km; Energy: '+strtrim(ein,2)+' keV'
+#              title='Altitude: '+strtrim(ss.altitude,2)+' km; Energy: '+strtrim(ein,2)+' keV'
 #            oplot,sp2[0,*],sp2[1,*],psym=4,symsize=0.4		
 #            oplot,sp[0,*],sp[1,*]
 
@@ -341,7 +351,8 @@ class SpecData:
        
     return row
   
-  def _barrel_sp_make_drm(self, angledist=1, whichone=1):
+  @staticmethod
+  def _barrel_sp_make_drm(ss, angledist=1, whichone=1):
     if angledist == 1:
       pitch = 'iso'
     elif angledist == 2:
@@ -353,8 +364,8 @@ class SpecData:
       raise ValueError('Bad response matrix ID number.')
     
     #Set up the response matrix
-    ctbins = self.ebins
-    elebins = self.elebins
+    ctbins = ss.e_bins
+    elebins = ss.ele_bins
     nct = ctbins.size
     nel = elebins.size
     #[ctwidth, ctmean, gmean] = SpecData.edge_products(ctbins)
@@ -364,7 +375,7 @@ class SpecData:
 
     #Build the DRM row by row:
     for i in np.arrange(nel-2):
-      row = self._barrel_sp_drm_row(elmean[i], ctbins, pitch)
+      row = SpecData._barrel_sp_drm_row(elmean[i], ctbins, pitch)
       drm[:, i] = row
 
     #Normalization factor derived from GEANT simulations:
@@ -372,11 +383,11 @@ class SpecData:
     drm = drm/2210.49
 
     if whichone == 1:
-       self.drm = drm 
-       self.drmtype = angledist
+       ss.drm = drm 
+       ss.drmtype = angledist
     else:
-       self.drm2 = drm
-       self.drm2type = angledist
+       ss.drm2 = drm
+       ss.drm2type = angledist
 
   #NAME: barrel_sp_fold.pro
   #DESCRIPTION: BARREL top-level spectral folding routine
@@ -438,38 +449,39 @@ class SpecData:
   #                           rates just before proceeding to fit
   #                11/12/13 - plot data before fitting in case fit crashes
   #                11/12/13 - bkg_renorm defaults to zero, not 1.
-  def _barrel_sp_fold(self, maxcycles=30, bkg_renorm=False,
+  @staticmethod
+  def _barrel_sp_fold(ss, maxcycles=30, bkg_renorm=False,
       method=1, model=1, fitrange=[110, 2500],
       modlfile = None, secondmodlfile=None, residuals=1):
     
-    self.method = method
-    self.model = model
-    self.fitrange = fitrange
-    self.bkg_renorm = bkg_renorm
-    self.modlfile = modlfile
-    self.secondmodlfile = secondmodlfile
+    ss.method = method
+    ss.model = model
+    ss.fitrange = fitrange
+    ss.bkg_renorm = bkg_renorm
+    ss.modlfile = modlfile
+    ss.secondmodlfile = secondmodlfile
 
     #CHECK CONSISTENCY OF INPUT PARAMETERS
-    if (self.method > 4) and (self.drm2type == -1):
+    if (ss.method > 4) and (ss.drm2type == -1):
       print('BARREL_SP_FOLD: Method > 3 requires a second response matrix (drm2).')
-    if (self.method != 1 and self.method != 4 and self.modlfile == ""):
+    if (ss.method != 1 and ss.method != 4 and ss.modlfile == ""):
       print('BARREL_SP_FOLD: This method requires a filename for an input model (modlfile)')
-    if (self.method == 3 or self.method == 6 and (self.modlfile == "" or self.secondmodlfile == "")):
+    if (ss.method == 3 or ss.method == 6 and (ss.modlfile == "" or ss.secondmodlfile == "")):
       print('BARREL_SP_FOLD: This method requires two filenames for input models (modlfile, secondmodlfile)')
 
     #Create energy bin centers and widths, find bins to use in fit:
-    [ctwidth, ctmean, ctgmean] = SpecData.edge_products(self.ebins)
-    [elwidth, elmean, elgmean] = SpecData.edge_products(self.elebins)
+    [ctwidth, ctmean, ctgmean] = SpecData.edge_products(ss.ebins)
+    [elwidth, elmean, elgmean] = SpecData.edge_products(ss.elebins)
 
-    usebins = np.where(ctmean > self.fitrange[0] and ctmean < self.fitrange[1])
+    usebins = np.where(ctmean > ss.fitrange[0] and ctmean < ss.fitrange[1])
 
     #Subtract background & calculate error bars on subtracted spectrum -- cts/keV:
-    src_spec = self.src_spec/self.src_live 
-    bkg_spec = self.bkg_spec/self.bkg_live 
-    src_spec_err = self.src_spec_err/self.src_live
-    bkg_spec_err = self.bkg_spec_err/self.bkg_live
+    src_spec = ss.src_spec/ss.src_live 
+    bkg_spec = ss.bkg_spec/ss.bkg_live 
+    src_spec_err = ss.src_spec_err/ss.src_live
+    bkg_spec_err = ss.bkg_spec_err/ss.bkg_live
     renorm = 1.
-    if (self.bkg_renorm): 
+    if (ss.bkg_renorm): 
       #normalize bkg so that it matches src at high energies.
       #med.spectra will only go up to 4 MeV, so we are keeping a
       #band at least 750 keV up to that, even though the hardest
@@ -479,12 +491,12 @@ class SpecData:
       renorm = src_spec[w].sum() / bkg_spec[w].sum()
       print("Background renormalization factor: {}".format(renorm))
       
-    self.bkg_spec = self.bkg_spec * renorm
-    self.subspec = self.src_spec - self.bkg_spec
-    self.subspec_err = np.sqrt(np.power(self.src_spec_err, 2) + np.power((self.bkg_spec_err * renorm), 2) )
-    print("Total count rate:      {} c/s".format((self.src_spec*ctwidth).sum()))
-    print("Background count rate: {} c/s".format((self.bkg_spec*ctwidth).sum()))
-    print("Net count rate:        {} c/s".format((self.subspec*ctwidth).sum()))
+    ss.bkg_spec = ss.bkg_spec * renorm
+    ss.subspec = ss.src_spec - ss.bkg_spec
+    ss.subspec_err = np.sqrt(np.power(ss.src_spec_err, 2) + np.power((ss.bkg_spec_err * renorm), 2) )
+    print("Total count rate:      {} c/s".format((ss.src_spec*ctwidth).sum()))
+    print("Background count rate: {} c/s".format((ss.bkg_spec*ctwidth).sum()))
+    print("Net count rate:        {} c/s".format((ss.subspec*ctwidth).sum()))
     
     #plot the data points: MOVE TO NOTEBOOK
     #window,xsize=500,ysize=800
@@ -506,23 +518,23 @@ class SpecData:
     
     #Do the actual fitting according to the chosen method:
     if method == 1:
-      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m1(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m1(
         elmean, elwidth, ctwidth, ctmean, usebins, maxcycles)
     elif method == 2:
-      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m2(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m2(
         elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 3:
-      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m3(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m3(
         secondmodlfile, elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 4:
-      [params, param_ranges, modvals, chisquare, dof] = self._barrel_sp_fold_m4(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m4(
         elmean, elwidth, ctwidth, usebins, maxcycles)
 
 
     #THESE SHOULD ALREADY BE SET 
     #Fill in the fit results in the structure:
     #numparams=params.size
-    #self.numparams=numparams
+    #ss.numparams=numparams
     #ss.params[0:numparams-1] = params
     #ss.param_ranges[0:numparams-1,*] = param_ranges
     #ss.modvals = modvals
@@ -643,20 +655,25 @@ class SpecData:
 
     return
 
-  def _barrel_sp_fold_m1(self, phmean, phwidth, ctwidth, ctmean, usebins, maxcycles):
+  @staticmethod
+  def _barrel_sp_readmodelspec(modlfile, phebins, phmean     )
+    return
+
+  @staticmethod
+  def _barrel_sp_fold_m1(ss, phmean, phwidth, ctwidth, ctmean, usebins, maxcycles):
     #Find good starting parameters:
-    if (self.model == 1):
+    if (ss.model == 1):
       #This formula for approximate e-folding from a count ratio between
       #two bands is empirical from simulations. 
       energies=dbase["guess_efold"]
       ratios=dbase["guess_efold_ratios"]
-    elif (self.model == 2):
+    elif (ss.model == 2):
       energies=dbase["guess_emono"]
       ratios=dbase["guess_emono_ratios"]
     
     w1 = np.where(ctmean > 110 and ctmean < 150.)[0]
     w2 = np.where(ctmean > 200. and ctmean < 250.)[0]
-    rat = self.subspec[w2].sum()/self.subspec[w1].sum()
+    rat = ss.subspec[w2].sum()/ss.subspec[w1].sum()
     
     if (rat < ratios.min()):
       startpar = min(energies)
@@ -665,18 +682,18 @@ class SpecData:
     else:
       startpar = np.interp(rat, energies, ratios)
         
-    if (self.model == 1):
-      tryspec = np.matmul((np.exp(-phmean/startpar)*phwidth), self.drm)
-    elif self.model == 2:
+    if (ss.model == 1):
+      tryspec = np.matmul((np.exp(-phmean/startpar)*phwidth), ss.drm)
+    elif ss.model == 2:
       tryspec = phmean*0.
       tryspec[np.where( np.abs(phmean-startpar) == np.abs(phmean-startpar).min())[0][0] ] = 1.
-      tryspec = np.matmul(tryspec, self.drm)
+      tryspec = np.matmul(tryspec, ss.drm)
     else:
       print('Only exponential or monoenergetic spectrum is currently supported.')
 
     #Find a starting normalization by scaling area of model and data
     #(this will be the same procedure for every starting model):
-    startnorm = (self.subspec[usebins]*ctwidth[usebins] ).sum() / ( tryspec[usebins]*ctwidth[usebins] ).sum()
+    startnorm = (ss.subspec[usebins]*ctwidth[usebins] ).sum() / ( tryspec[usebins]*ctwidth[usebins] ).sum()
 
     #Try a starting range around these trial values.  If the minimum 
     #chi-square is not on the boundary, zoom in.  If it is, zoom out.
@@ -694,7 +711,7 @@ class SpecData:
     #     startnorm, points, scaling, bestpar, bestnorm, bestparn, bestnormn, modvals, $
     #     chiarray, bestchi, pararray, normarray
     for i in range(maxcycles):
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = self._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
       
@@ -756,7 +773,7 @@ class SpecData:
     goingup = [0,0]
 
     for i in range(maxcycles):      
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = self._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
       #First see if the contour is completely closed:
@@ -794,7 +811,7 @@ class SpecData:
 
       points = 40
 
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = self._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
 
@@ -811,15 +828,15 @@ class SpecData:
 
     return [params, param_ranges, modvals, chisquare, dof]
   
-
-  def _barrel_sp_fold_m2(self, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
-    subspec = self.subspec
-    subspecerr = self.subspec_err
-    modlfile = self.modlfile
-    drm = self.drm
+  @staticmethod
+  def _barrel_sp_fold_m2(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss.subspec
+    subspecerr = ss.subspec_err
+    modlfile = ss.modlfile
+    drm = ss.drm
     
-    ### FIX - SHould modelspec be attached to self? Or passed into fitgrid?
-    modelspec = barrel_sp_readmodelspec(modlfile, phebins, phmean)
+    ### FIX - Should modelspec be attached to self? Or passed into fitgrid?
+    modelspec = SpecData._barrel_sp_readmodelspec(modlfile, phebins, phmean)
 
     tryspec = np.matmul(drm, modelspec*phwidth)
 
@@ -947,8 +964,8 @@ class SpecData:
     drm = self.drm
 
     ### FIX 
-    modelspec1 = barrel_sp_readmodelspec(modlfile, phebins, phmean)    
-    modelspec2 = barrel_sp_readmodelspec(secondmodlfile, phebins, phmean)
+    modelspec1 = SpecData._barrel_sp_readmodelspec(modlfile, phebins, phmean)    
+    modelspec2 = SpecData._barrel_sp_readmodelspec(secondmodlfile, phebins, phmean)
 
     #Initial starting parameter is equal parts of each model
     tryspec1 = np.matmul(drm, modelspec1*phwidth)

@@ -14,8 +14,6 @@ def load(trange=None,
          get_support_data=False,
          files='',
          notplot=False,
-         prefix='',
-         suffix='',
          downloadonly=False,
          no_update=False,
          time_clip=False,
@@ -39,11 +37,6 @@ def load(trange=None,
     
     if trange is None:
         trange = CONFIG['defaults'][probe[0]]
-
-    if prefix is None:
-        prefix = ''
-    if suffix is None:
-        suffix = ''
 
     out_files = []
     for prb in probe:
@@ -77,9 +70,8 @@ def load(trange=None,
         p_start = file.find("bar_")
         p_end = file.find("_", p_start + len("bar_"))
         flight = str.upper(file[p_start+len("bar_"):p_end + 1])
-        internal_prefix = "brl"+flight
-        prefix = prefix+internal_prefix
-        tvars = tvars + cdf_to_tplot(out_files, prefix=prefix, suffix=suffix, get_support_data=get_support_data, notplot=notplot)
+        prefix = "brl"+flight
+        tvars = tvars + cdf_to_tplot(out_files, prefix=prefix, get_support_data=get_support_data, notplot=notplot)
 
     if len(tvars) == 0:
         return
