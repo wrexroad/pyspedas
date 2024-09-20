@@ -36,8 +36,8 @@ class SpecData:
       'subspec': np.ones(size) * -1,                        # background subtracted spectrum, deadtime corrected
       'subspec_err': np.ones(size) * -1,                    # error in background subtracted spectrum
       'drm_size': drm_size,                                 # number of drm rows (electron side)
-      'e_bins': SpecData._make_standard_energies(is_slow),      # energy channel boundaries (keV)
-      'ele_bins': SpecData._make_standard_electron_energies(is_slow),   # energy boundaries on electron side (ct side is fixed)
+      'e_bins': SpecData.make_standard_energies(is_slow),      # energy channel boundaries (keV)
+      'ele_bins': SpecData.make_standard_electron_energies(is_slow),   # energy boundaries on electron side (ct side is fixed)
       'drm': np.ones((size, drm_size), dtype="float"),      # response matrix
       'drm_type': -1,                                       # 1 =downward isotropic, 2 =mirroring, 3 =other
       'drm2': np.ones((size, drm_size), dtype="float")*-1,  # second response matrix 
@@ -58,7 +58,7 @@ class SpecData:
   def edge_products(edges):
 
     if isinstance(edges, list):
-      array_version = np.array(input_array)
+      edges = np.array(edges)
 
     if not isinstance(edges, np.ndarray):
       raise ValueError("Input must be a list or a NumPy array")
@@ -88,7 +88,7 @@ class SpecData:
     return [width, mean, gmean]
 
   @staticmethod  
-  def brl_rebin(oldVals, oldBins, newBins, flux=False):
+  def rebin(oldVals, oldBins, newBins, flux=False):
     n = oldBins.size
     m = newBins.size
     
@@ -143,13 +143,13 @@ class SpecData:
       oldHi=oldBins[oldIndex+1]
 
   @staticmethod
-  def barrel_sp_brem(x, a):
+  def sp_brem(x, a):
     e0 = a[5] #frozen
-    ff = a[0] * np.exp(-(e0/(e0**a[1]-np.power(x,a[1]))))/np.power(x,a[2])*np.exp(-a[3]/(x-a[4]))
+    f = a[0] * np.exp(-(e0/(e0**a[1]-np.power(x,a[1]))))/np.power(x,a[2])*np.exp(-a[3]/(x-a[4]))
     return f
   
   @staticmethod
-  def barrel_sp_patch_drmrow(f):
+  def sp_patch_drmrow(f):
     #Look for the signature of an upward spike and zero out above that:
     n = f.size
     shift = np.roll(f,1)
@@ -160,14 +160,15 @@ class SpecData:
       f[w[0]:] = 0
     return f
 
-  def _make_standard_energies(is_slow):
+  @staticmethod
+  def make_standard_energies(is_slow):
     d = SpecData.calib_sspc if is_slow else SpecData.calib_mspc
     return d[:,1]
   
   @staticmethod
-  def _make_standard_electron_energies(is_slow):
+  def make_standard_electron_energies(is_slow):
     #get sspc standard energies
-    e0 = SpecData._make_standard_energies(is_slow)
+    e0 = SpecData.make_standard_energies(is_slow)
     
     if is_slow:
       e = e0
@@ -189,15 +190,15 @@ class SpecData:
     return e
 
   @staticmethod
-  def _get_altitude(ss):
+  def get_altitude(ss):
     return
   
   @staticmethod
-  def _get_maglat(ss):
+  def get_maglat(ss):
     return
 
   @staticmethod
-  def _barrel_sp_drm_interp(altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
+  def sp_drm_interp(altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
     #loginterpolate = 1 : logarithmic interpolation
 
     if (pitch != "iso" and pitch != "mir"):
@@ -254,10 +255,10 @@ class SpecData:
     curve = np.zeros(ein)
     if (g1 == 0.):
       a = fitparams[i1, 1:7]
-      f1 = SpecData.barrel_sp_brem(ebins, a)
+      f1 = SpecData.sp_brem(ebins, a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = SpecData.barrel_sp_patch_drmrow(f1)
+      f1 = SpecData.sp_patch_drmrow(f1)
 
       curve = f1
       #For Notebook
@@ -267,13 +268,13 @@ class SpecData:
       #    xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev'
       #else:
       a = fitparams[i1, 1:7]
-      f1 = SpecData.barrel_sp_brem(e1,a)
+      f1 = SpecData.sp_brem(e1,a)
       a = fitparams[i2, 1:7]
-      f2 = SpecData.barrel_sp_brem(e2,a)
+      f2 = SpecData.sp_brem(e2,a)
 
       #Fix some blowing up at low energies temporarily:
-      f1 = SpecData.barrel_sp_patch_drmrow(f1)
-      f2 = SpecData.barrel_sp_patch_drmrow(f2)
+      f1 = SpecData.sp_patch_drmrow(f1)
+      f2 = SpecData.sp_patch_drmrow(f2)
 
       if (loginterpolate):
         curve = np.exp(
@@ -298,7 +299,8 @@ class SpecData:
 
     return a
   
-  def _barrel_sp_drm_row(ss, ein, ctbins, pitch="iso"):
+  @staticmethod
+  def sp_drm_row(ss, ein, ctbins, pitch="iso"):
     if pitch != 'iso' and pitch != 'mir':
       raise ValueError('Illegal distribution name.  Use iso or mir.')
     
@@ -317,12 +319,12 @@ class SpecData:
 
     for i in np.arange(2):
       if (ss.altitude == al[i]) or (ss.altitude == 40):
-        sp = SpecData._barrel_sp_drm_interp(ss.altitude, ein, True, pitch)
+        sp = SpecData.sp_drm_interp(ss.altitude, ein, True, pitch)
         if (sp.size == 1): print("Energy out of range.")
       else:
         if (ss.altitude > al[i]) and (ss.altitude < al[i+1]):
-          sp1 = SpecData._barrel_sp_drm_interp(al[i], ein, True, pitch)
-          sp2 = SpecData._barrel_sp_drm_interp(al[i+1], ein, True, pitch)
+          sp1 = SpecData.sp_drm_interp(al[i], ein, True, pitch)
+          sp2 = SpecData.sp_drm_interp(al[i+1], ein, True, pitch)
           n1 = sp1.size
           n2 = sp2.size
           if (sp1.size == 1): print("Energy out of range.")
@@ -347,12 +349,12 @@ class SpecData:
     e1 = np.concatenate((sp[:, 0] - 0.5, [sp[-1, 0] + 1.0]))
     e2 = ctbins
 
-    row = SpecData.brl_rebin(s1, e1, e2, flux=1)
+    row = SpecData.rebin(s1, e1, e2, flux=1)
        
     return row
   
   @staticmethod
-  def _barrel_sp_make_drm(ss, angledist=1, whichone=1):
+  def sp_make_drm(ss, angledist=1, whichone=1):
     if angledist == 1:
       pitch = 'iso'
     elif angledist == 2:
@@ -375,7 +377,7 @@ class SpecData:
 
     #Build the DRM row by row:
     for i in np.arrange(nel-2):
-      row = SpecData._barrel_sp_drm_row(elmean[i], ctbins, pitch)
+      row = SpecData.sp_drm_row(elmean[i], ctbins, pitch)
       drm[:, i] = row
 
     #Normalization factor derived from GEANT simulations:
@@ -450,7 +452,7 @@ class SpecData:
   #                11/12/13 - plot data before fitting in case fit crashes
   #                11/12/13 - bkg_renorm defaults to zero, not 1.
   @staticmethod
-  def _barrel_sp_fold(ss, maxcycles=30, bkg_renorm=False,
+  def sp_fold(ss, maxcycles=30, bkg_renorm=False,
       method=1, model=1, fitrange=[110, 2500],
       modlfile = None, secondmodlfile=None, residuals=1):
     
@@ -518,16 +520,16 @@ class SpecData:
     
     #Do the actual fitting according to the chosen method:
     if method == 1:
-      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m1(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData.sp_fold_m1(
         elmean, elwidth, ctwidth, ctmean, usebins, maxcycles)
     elif method == 2:
-      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m2(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData.sp_fold_m2(
         elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 3:
-      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m3(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData.sp_fold_m3(
         secondmodlfile, elmean, elwidth, ctwidth, usebins, maxcycles)
     elif method == 4:
-      [params, param_ranges, modvals, chisquare, dof] = SpecData._barrel_sp_fold_m4(
+      [params, param_ranges, modvals, chisquare, dof] = SpecData.sp_fold_m4(
         elmean, elwidth, ctwidth, usebins, maxcycles)
 
 
@@ -656,11 +658,11 @@ class SpecData:
     return
 
   @staticmethod
-  def _barrel_sp_readmodelspec(modlfile, phebins, phmean     )
+  def sp_readmodelspec(modlfile, phebins, phmean     )
     return
 
   @staticmethod
-  def _barrel_sp_fold_m1(ss, phmean, phwidth, ctwidth, ctmean, usebins, maxcycles):
+  def sp_fold_m1(ss, phmean, phwidth, ctwidth, ctmean, usebins, maxcycles):
     #Find good starting parameters:
     if (ss.model == 1):
       #This formula for approximate e-folding from a count ratio between
@@ -711,7 +713,7 @@ class SpecData:
     #     startnorm, points, scaling, bestpar, bestnorm, bestparn, bestnormn, modvals, $
     #     chiarray, bestchi, pararray, normarray
     for i in range(maxcycles):
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData.sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
       
@@ -773,7 +775,7 @@ class SpecData:
     goingup = [0,0]
 
     for i in range(maxcycles):      
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData.sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
       #First see if the contour is completely closed:
@@ -811,7 +813,7 @@ class SpecData:
 
       points = 40
 
-      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData._barrel_sp_fitgrid1(
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = SpecData.sp_fitgrid1(
         phmean, phwidth, usebins, startpar, startnorm, points, scaling
       )
 
@@ -829,14 +831,14 @@ class SpecData:
     return [params, param_ranges, modvals, chisquare, dof]
   
   @staticmethod
-  def _barrel_sp_fold_m2(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+  def sp_fold_m2(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
     subspec = ss.subspec
     subspecerr = ss.subspec_err
     modlfile = ss.modlfile
     drm = ss.drm
     
     ### FIX - Should modelspec be attached to self? Or passed into fitgrid?
-    modelspec = SpecData._barrel_sp_readmodelspec(modlfile, phebins, phmean)
+    modelspec = SpecData.sp_readmodelspec(modlfile, phebins, phmean)
 
     tryspec = np.matmul(drm, modelspec*phwidth)
 
@@ -858,7 +860,7 @@ class SpecData:
 
     #Iterate the fit, adjusting the scale dynamically:
     for i in range(maxcycles):
-      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = self._barrel_sp_fitgrid2(
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = SpecData.sp_fitgrid2(
         phmean, phwidth, usebins, startnorm, points, scaling
       )
       
@@ -913,7 +915,7 @@ class SpecData:
     goingup = 0
 
     for i in range(maxcycles):
-      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = self._barrel_sp_fitgrid2(
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = SpecData.sp_fitgrid2(
         phmean, phwidth, usebins, startnorm, points, scaling
       )
 
@@ -941,7 +943,7 @@ class SpecData:
 
       points = 40
 
-      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = self._barrel_sp_fitgrid2(
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = SpecData.sp_fitgrid2(
         phmean, phwidth, usebins, startnorm, points, scaling
       )
 
@@ -956,16 +958,17 @@ class SpecData:
 
     return [params, param_ranges, modvals, chisquare, dof]
 
-  def _barrel_sp_fold_m3(self, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
-    subspec = self.subspec
-    subspecerr = self.subspec_err
-    modlfile = self.modlfile
-    secondmodlfile = self.secondmodlfile
-    drm = self.drm
+  @staticmethod
+  def sp_fold_m3(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss.subspec
+    subspecerr = ss.subspec_err
+    modlfile = ss.modlfile
+    secondmodlfile = ss.secondmodlfile
+    drm = ss.drm
 
     ### FIX 
-    modelspec1 = SpecData._barrel_sp_readmodelspec(modlfile, phebins, phmean)    
-    modelspec2 = SpecData._barrel_sp_readmodelspec(secondmodlfile, phebins, phmean)
+    modelspec1 = SpecData.sp_readmodelspec(modlfile, phebins, phmean)    
+    modelspec2 = SpecData.sp_readmodelspec(secondmodlfile, phebins, phmean)
 
     #Initial starting parameter is equal parts of each model
     tryspec1 = np.matmul(drm, modelspec1*phwidth)
@@ -988,8 +991,8 @@ class SpecData:
 
     #Iterate the fit, adjusting the scale dynamically:
     for i in range(maxcycles):
-      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
-        self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = specData.sp_fitgrid3(
+        ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
       )
 
       #if best value is not on boundary, zoom in or finish.
@@ -1053,8 +1056,8 @@ class SpecData:
     print('Starting search for error contour.')
 
     for i in range(maxcycles):
-      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
-        self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = SpecData.sp_fitgrid3(
+        ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
       )
 
       #First see if the contour is completely closed:
@@ -1098,8 +1101,8 @@ class SpecData:
 
     points = 40
 
-    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = self._barrel_sp_fitgrid3(
-      self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = SpecData.sp_fitgrid3(
+      ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
     )
 
     #Pick out the subset of points within the min(chisquare)+1. contour:
@@ -1116,12 +1119,13 @@ class SpecData:
 
     return [params, param_ranges, modvals, secondmodvals, chisquare, dof]
 
-  def _barrel_sp_fold_m4(self, phmean, phwidth, ctwidth, usebins, maxcycles):
-    subspec = self.subspec
-    subspecerr = self.subspecerr
-    model = self.model
-    drm = self.drm
-    drm2 = self.drm2
+  @staticmethod
+  def sp_fold_m4(ss, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss.subspec
+    subspecerr = ss.subspecerr
+    model = ss.model
+    drm = ss.drm
+    drm2 = ss.drm2
 
     if (model == 1):
       #This formula for approximate e-folding from a count ratio between
@@ -1163,8 +1167,8 @@ class SpecData:
 
     #Iterate the fit, adjusting the scale dynamically:
     for i in range(maxcycles):
-        [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = self._barrel_sp_fitgrid4(
-          self, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+        [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = SpecData.sp_fitgrid4(
+          ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
         )
         #if best value is not on boundary, zoom in or finish.
         #Note that zooming in or out on scalingdrm doesn't do anything if
@@ -1235,8 +1239,8 @@ class SpecData:
     goingup = [0,0,0]
 
     for i in maxcycles:
-      [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = self._barrel_sp_fitgrid4(
-        self, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+      [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = SpecData.sp_fitgrid4(
+        ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
       )
       
       #First see if the contour is completely closed:
@@ -1275,8 +1279,8 @@ class SpecData:
     #do one very fine map of chisquare space to find the error bars:
 
     points = 40
-    [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = self._barrel_sp_fitgrid4(
-      self, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+    [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = SpecData.sp_fitgrid4(
+      ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
     )
 
     #Pick out the subset of points within the min(chisquare)+1. contour:
@@ -1294,11 +1298,12 @@ class SpecData:
 
     return [params, param_ranges, modvals, chisquare, dof]
   
-  def _barrel_sp_fitgrid1(self, phmean, phwidth, usebins, startpar, startnorm, points, scaling):
-    subspec = self.subspec
-    subspecerr = self.subspecerr
-    model = self.model
-    drm = self.drm
+  @staticmethod
+  def sp_fitgrid1(ss, phmean, phwidth, usebins, startpar, startnorm, points, scaling):
+    subspec = ss.subspec
+    subspecerr = ss.subspecerr
+    model = ss.model
+    drm = ss.drm
 
     #Set up the vectors of values for parameters and normalizations:
     pts = 2*points + 1
@@ -1403,11 +1408,12 @@ class SpecData:
     
     return [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray]
   
-  def _barrel_sp_fitgrid2(self, phmean, phwidth, usebins, startnorm, points, scaling):
-    subspec = self.subspec
-    subspecerr = self.subspecerr
-    modelspec = self.modelspec
-    drm = self.drm
+  @staticmethod
+  def sp_fitgrid2(ss, phmean, phwidth, usebins, startnorm, points, scaling):
+    subspec = ss.subspec
+    subspecerr = ss.subspecerr
+    modelspec = ss.modelspec
+    drm = ss.drm
 
     pts = 2*points + 1
     normvector = [np.arange(pts)-points]*scaling[0]/points*startnorm + startnorm
@@ -1435,12 +1441,13 @@ class SpecData:
 
     return [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray]
 
-  def _barrel_sp_fitgrid3(self, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling):
-    subspec = self.subspec
-    subspecerr = self.subspecerr
-    modelspec1 = self.modelspec1
-    modelspec2 = self.modelspec2
-    drm = self.drm
+  @staticmethod
+  def sp_fitgrid3(ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling):
+    subspec = ss.subspec
+    subspecerr = ss.subspecerr
+    modelspec1 = ss.modelspec1
+    modelspec2 = ss.modelspec2
+    drm = ss.drm
 
     #Set up the vectors of values for parameters and normalizations:
     pts = 2*points + 1
@@ -1481,12 +1488,13 @@ class SpecData:
 
     return [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals1, modvals2, chiarray, bestchi, norm1array, norm2array]
   
-  def _barrel_sp_fitgrid4(self, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling):
-    subspec = self.subspec
-    subspecerr = self.subspecerr
-    model = self.model
-    drm = self.drm
-    drm2 = self.drm2
+  @staticmethod
+  def sp_fitgrid4(ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling):
+    subspec = ss.subspec
+    subspecerr = ss.subspecerr
+    model = ss.model
+    drm = ss.drm
+    drm2 = ss.drm2
 
     #Set up the vectors of values for parameters and normalizations:
     pts = 2*points + 1
@@ -1556,8 +1564,8 @@ class SpecData:
 
     return [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray]
 
-
-  def _barrel_read_model(self, model_file, phebins, phmean):
+  @staticmethod
+  def read_model(model_file, phebins, phmean):
     modeldata = np.loadtxt(model_file, delimiter=None)
     n = modeldata.shape(0)
     if (n < 3):
@@ -1568,7 +1576,7 @@ class SpecData:
 
     model_ebins = np.concatenate([modeldata[:,0], np.array([modeldata[n-1,1]])])
     if ( ( model_ebins.size != phebins.size ) or np.max(np.abs(model_ebins-phebins)) > 1.0 ):
-      [modelmean, gmean, modelwidth, edges_2, edges_1] = self._barrel_edge_products(model_ebins)
+      [modelmean, gmean, modelwidth, edges_2, edges_1] = SpecData.edge_products(model_ebins)
       interp_func = interp1d(modelmean, modeldata[:,2], kind='linear', fill_value="extrapolate")
       outspec = interp_func(phmean)
 
@@ -1581,47 +1589,47 @@ class SpecData:
 
     return outspec
 
-  def _barrel_edge_products(self, edges, contiguous=False, epsilon=False):
-    #Set up defaults for degenerate case of single value
-    width = 0.0
-    mean = edges
-    gmean = edges
-    edges_2 = edges
-    edges_1 = edges
-    
-    if edges.size == 1:
-      return [mean, gmean, width, edges_2, edges_1]
-
-    dims = edges.shape #FIX THIS
-
-    if dims[0] == 2 and dims[1] == 2: 
-      n = dims[2]
-      edges_2 = edges
-      edges_1 = np.concatenate([edges_2[:,0], np.array([edges_2[n-1, 1]])])
-    else:
-      n = edges.size-1
-      edges_2 = np.transpose(np.vstack((edges.flatten()[0:n],edges.flatten()[1:])))
-      edges_1 = edges
-    
-    #QUESTION
-    #Is 'contiguous' ever set?
-    #if (contiguous):
-    #  diff = (f_div(edges[1:*]-edges,edges))
-    #  resistant_mean, diff, 2.0, av_diff
-    #
-    #  default, epsilon, av_diff gt 0 ? (av_diff*1e-5 > 1e-6) : 1e-5
-    #
-    #    edges_1 =get_uniq(edges, epsilon=epsilon) ;edges(uniq( edges, sort(edges)))
-    #    n = n_elements( edges_1 ) -1
-    #    edges_2 = transpose( [ [edges_1(0:n-1)],[edges_1(1:*)]])
-    #    endif
-
-    mean = np.sum(edges, axis=1)/2
-    
-    gmean = edges_2[:, 0]*edges_2[:, 1]
-    gmean[gmean < 0] = 0
-    gmean = np.sqrt(gmean)
-
-    width = np.abs(edges_2[:,1]-edges_2[:,0])
-
-    return [mean, gmean, width, edges_2, edges_1]
+#  def _barrel_edge_products(self, edges, contiguous=False, epsilon=False):
+#    #Set up defaults for degenerate case of single value
+#    width = 0.0
+#    mean = edges
+#    gmean = edges
+#    edges_2 = edges
+#    edges_1 = edges
+#    
+#    if edges.size == 1:
+#      return [mean, gmean, width, edges_2, edges_1]
+#
+#    dims = edges.shape #FIX THIS
+#
+#    if dims[0] == 2 and dims[1] == 2: 
+#      n = dims[2]
+#      edges_2 = edges
+#      edges_1 = np.concatenate([edges_2[:,0], np.array([edges_2[n-1, 1]])])
+#    else:
+#      n = edges.size-1
+#      edges_2 = np.transpose(np.vstack((edges.flatten()[0:n],edges.flatten()[1:])))
+#      edges_1 = edges
+#    
+#    #QUESTION
+#    #Is 'contiguous' ever set?
+#    #if (contiguous):
+#    #  diff = (f_div(edges[1:*]-edges,edges))
+#    #  resistant_mean, diff, 2.0, av_diff
+#    #
+#    #  default, epsilon, av_diff gt 0 ? (av_diff*1e-5 > 1e-6) : 1e-5
+#    #
+#    #    edges_1 =get_uniq(edges, epsilon=epsilon) ;edges(uniq( edges, sort(edges)))
+#    #    n = n_elements( edges_1 ) -1
+#    #    edges_2 = transpose( [ [edges_1(0:n-1)],[edges_1(1:*)]])
+#    #    endif
+#
+#    mean = np.sum(edges, axis=1)/2
+#    
+#    gmean = edges_2[:, 0]*edges_2[:, 1]
+#    gmean[gmean < 0] = 0
+#    gmean = np.sqrt(gmean)
+#
+#    width = np.abs(edges_2[:,1]-edges_2[:,0])
+#
+#    return [mean, gmean, width, edges_2, edges_1]
