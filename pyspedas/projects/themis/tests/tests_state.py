@@ -1,10 +1,10 @@
 import logging
 import unittest
-from pyspedas.projects.themis import state
+from pyspedas.projects.themis import state, ssc, ssc_pre
 from pytplot import data_exists, get_data, del_data, tplot_restore
 from numpy.testing import assert_allclose
 
-class StateDataValidation(unittest.TestCase):
+class Themis_StateDataTests(unittest.TestCase):
     """ Tests creation of support variables in themis.state() """
 
     @classmethod
@@ -100,6 +100,21 @@ class StateDataValidation(unittest.TestCase):
         state(trange=['2007-03-23','2007-03-24'], probe='b',varformat='*pos*',exclude_format='*sse*')
         self.assertTrue(data_exists('thb_pos_gse'))
         self.assertFalse(data_exists('thb_pos_sse'))
+
+    def test_state_suffix_spinmodel(self):
+        from pyspedas.projects.themis import get_spinmodel
+        # Test that the exclude_format option to state() works
+        state(trange=['2007-03-23','2007-03-24'], probe='a',suffix='_suffix', get_support_data=True)
+        model = get_spinmodel('a', 2)
+        self.assertTrue(model is not None)
+
+    def test_ssc(self):
+        vars = ssc()
+        self.assertTrue(len(vars) > 0)
+
+    def test_ssc_pre(self):
+        vars = ssc_pre()
+        self.assertTrue(len(vars) > 0)
 
 if __name__ == '__main__':
     unittest.main()
