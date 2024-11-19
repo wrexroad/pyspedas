@@ -7,6 +7,8 @@ from .config import CONFIG
 
 
 def load(trange=None,
+         prefix="",
+         suffix="",
          probe='1A',
          datatype='sspc', 
          level='l2',
@@ -70,8 +72,11 @@ def load(trange=None,
         p_start = file.find("bar_")
         p_end = file.find("_", p_start + len("bar_"))
         flight = str.upper(file[p_start+len("bar_"):p_end + 1])
-        prefix = "brl"+flight
-        tvars = tvars + cdf_to_tplot(out_files, prefix=prefix, get_support_data=get_support_data, notplot=notplot)
+        
+        vars_in_file = cdf_to_tplot(out_files, prefix=prefix+"brl"+flight, suffix=suffix, get_support_data=get_support_data, notplot=notplot)
+        for v in vars_in_file:
+            if v not in tvars:
+                tvars.append(v)
 
     if len(tvars) == 0:
         return
