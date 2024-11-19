@@ -7,3 +7,5 @@ from .rcnt import rcnt
 from .magn import magn
 from .ephm import ephm
 from .hkpg import hkpg
+
+from .spec import spec
