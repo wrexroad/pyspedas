@@ -9,3 +9,4 @@ from .ephm import ephm
 from .hkpg import hkpg
 
 from .spec import spec
+from .dbase import dbase
