@@ -52,6 +52,11 @@ class spec:
     size = 256 if is_slow else 48
     drm_size = 256 if is_slow else 184
 
+    #get the average altitude from the flight data. There may be fill values in the array, so they need to be filtered out
+    pyspedas.barrel.ephm(event_periods[0], payload)
+    alt_data = np.array(pytplot.get_data("brl"+payload+"_GPS_Alt").y)
+    ave_alt = np.mean(alt_data[~np.isnan(alt_data)])
+
     return {
       'payload': payload,                                   # Two-character payload ID (e.g. 1F)
       'tplot_var': tplot_var,
@@ -63,7 +68,7 @@ class spec:
       'num_bkg': len(background_periods),                   # of background spectrum time intervals (default 1) 
       'is_slow': is_slow,                                   # slow spectrum (256 bins) or medium spectrum (48 bins) 
       'size': size,                                         # number of bins in spectrum 
-      'altitude': -1,                                       # altitude in km
+      'altitude': ave_alt,                                  # altitude in km
       'maglat': -1,                                         # magnetic latitude in degrees
       'bkg_method': 1,                                      # 1 = from data stream, 2 =from model
       'src_spec': np.ones(size, dtype="float") * -1,        # summed source spectrum, deadtime corrected       
@@ -146,16 +151,16 @@ class spec:
     dims = edges.shape
     
     if len(dims) > 1 and dims[1] == 2:
-        edges_2 = edges
-        edges_1 = np.concatenate([edges_2[:,1],[edges_2[:,0][-1]]])
+      edges_2 = edges
+      edges_1 = np.concatenate([edges_2[:,1],[edges_2[:,0][-1]]])
     else:
-        edges_2 = np.array([edges[0:-1], edges[1:]]).transpose()
-        edges_1 = edges
-
+      edges_2 = np.array([edges[0:-1], edges[1:]])
+      edges_1 = edges
+    
     mean = edges_2.sum(0)/2
     gmean = np.sqrt((edges_2[:,0]*edges_2[:, 1]))
-    width = np.abs(edges_2[:,1]-edges_2[:,0])
-
+    width = np.abs(edges_2[1,:]-edges_2[0,:])
+    
     return [width, mean, gmean]
   
   @staticmethod
@@ -164,7 +169,6 @@ class spec:
       pyspedas.barrel.ephm(ss["trange"][0], ss["payload"])
       ts, alt = pytplot.get_data('brl'+ss["payload"]+'_GPS_Alt')
       ss["altitude"] = altitude if altitude else alt[int(alt.size/2)]
-      print(ss["altitude"])
 
     if maglat is None and ss["bkg_method"]==2:
       print("Please supply magnetic latitude")
@@ -215,8 +219,8 @@ class spec:
       ##Generate background model in 5 keV bins and rebin:
       #fine_ebins = findgen(1400)*5.+20.
       #edge_products, fine_ebins, mean=fmean, width=fwidth
-      #bkgfine = barrel_make_model_bkg( fmean, ss.altitude, ss.maglat )
-      #bkgnormal = brl_rebin(bkgfine,fine_ebins,ss.ebins,flux=1)
+      #bkgfine = barrel_make_model_bkg( fmean, ss["altitude"], ss["maglat"] )
+      #bkgnormal = brl_rebin(bkgfine,fine_ebins,ss["e_bins"],flux=1)
       #ss["bkg_spec"] = bkgnormal
       #ss["bkg_live"] = 1.
       #ss["bkg_time"] = 1.
@@ -273,6 +277,1318 @@ class spec:
     
     return (spectrum, livetime, rawtime)
     
+  @staticmethod
+  def sp_make_drm(ss, angledist=1, whichone=1):
+    if angledist == 1:
+      pitch = 'iso'
+    elif angledist == 2:
+      pitch = 'mir'
+    else:
+      raise ValueError('Invalid value for angular distribution index.')
+
+    print(f"Making DRM for {ss['payload']} at {ss['altitude']:.2f}km.")
+
+    if whichone != 1 and whichone != 2:
+      raise ValueError('Bad response matrix ID number.')
+    
+    #Set up the response matrix
+    ctbins = ss["e_bins"]
+    elebins = ss["ele_bins"]
+    nct = ctbins.size
+    nel = elebins.size
+    
+    #[ctwidth, ctmean, gmean] = spec.edge_products(ctbins)
+    [elwidth, elmean, gmean] = spec.edge_products(elebins)
+
+    drm = np.ones([nct-1, nel-1], dtype="float")
+
+    #Build the DRM row by row:
+    for i in np.arange(nel-1):
+      row = spec.sp_drm_row(ss, elmean[i], ctbins, pitch)
+      drm[:, i] = row
+      #drm[1, :] = row
+
+    #Normalization factor derived from GEANT simulations:
+    #100000000. input e- / (!pi*120.cm^2) = 2210.49 electrons/cm2.
+    drm = drm/2210.49
+    print(drm)
+    if whichone == 1:
+       ss["drm"] = drm 
+       ss["drmtype"] = angledist
+    else:
+       ss["drm2"] = drm
+       ss["drm2type"] = angledist
+
+    return drm
+
+  @staticmethod
+  def sp_drm_row(ss, ein, ctbins, pitch="iso"):
+    if pitch != 'iso' and pitch != 'mir':
+      raise ValueError('Illegal distribution name.  Use iso or mir.')
+    
+    if ss["altitude"] < 25:
+      print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude < 25 km, being set to 25 km.")
+      ss["altitude"] = 25
+
+    if ss["altitude"] > 40:
+      print("BARREL_SP_RESPONSE_INTERP Warning:\n\taltitude > 40 km, being set to 40 km.")
+      ss["altitude"] = 40
+  
+    al = np.array([25, 30, 35, 40])
+
+    if ein < 50 or ein > 4000:
+      return np.zeros(ctbins.size-1)
+
+    for i in np.arange(3):
+      if (ss["altitude"] == al[i]) or (ss["altitude"] == 40):
+        sp = spec.sp_drm_interp(ss["altitude"], ein, True, pitch)
+        if (sp.size == 1): print("Energy out of range.")
+      else:
+        if (ss["altitude"] > al[i]) and (ss["altitude"] < al[i+1]):
+
+          sp1 = spec.sp_drm_interp(al[i], ein, True, pitch)
+          sp2 = spec.sp_drm_interp(al[i+1], ein, True, pitch)
+          n1 = sp1.size
+          n2 = sp2.size
+          if (sp1.size == 1): print("Energy out of range.")
+          
+          de = sp2[:, 0]-sp1[:, 0]
+          ga = (ss["altitude"] - al[i])/5.
+          sp = np.zeros([sp2[:, 1].size, 2])
+          sp[:, 0] = sp2[:, 0]
+          sp[:, 1] = sp1[:, 1] + ga*(sp2[:, 1] - sp1[:, 1])
+    
+    #rebin to desired energy bins:
+    s1 = sp[:, 1]
+    e1 = np.concatenate([(sp[:, 0])-0.5, [sp[sp[:, 0].size-1, 0] + 1.0]])
+    e2 = ctbins
+    print(s1)
+    row = spec.rebin(s1, e1, e2, True)
+    print(row)
+    return row
+
+  @staticmethod
+  def sp_drm_interp(altitude, ein, loginterpolate=False, pitch='iso', show=False, verbose=False):
+    #loginterpolate = 1 : logarithmic interpolation
+
+    if (pitch != "iso" and pitch != "mir"):
+      print("Illegal distribution name.  Use iso or mir.")
+
+    if (altitude < 25.):
+      print("BARREL_SP_RESPONSE_INTERP Warning: altitude < 25 km, being set to 25 km.")
+      altitude = 25.
+    
+    if (altitude > 40.):
+      print,"BARREL_SP_RESPONSE_INTERP Warning: altitude > 40 km, being set to 40 km."
+      altitude = 40.
+
+    #For Notebook
+    #if (show):
+    #  loadct,13
+    
+    #27 electron energy input curve fitting parms a[0-5]
+    if (altitude < 27.5):
+      fitparams = dbase.iso_27e_sspc_rawfit_params_25
+    elif (altitude < 32.5):
+      fitparams = dbase.iso_27e_sspc_rawfit_params_30
+    elif (altitude < 37.5):
+      fitparams = dbase.iso_27e_sspc_rawfit_params_35
+    else:
+      fitparams = dbase.iso_27e_sspc_rawfit_params_40
+
+    es = fitparams[:,0]
+    if (ein < es[0]) or (ein > 4000.):
+      print("Electron energy out of range: {}. Use {}".format(ein, es[0]))
+      return 0
+    
+    #to find the nearest energy and for later interpolation
+    for i, es_i in enumerate(es):
+      if ((ein == es_i) or (ein == 4000)):
+        i1=i
+        i2=i
+        g1=0.
+      elif ((ein > es_i) and (ein < es[i+1])):
+        i1=i
+        i2=i+1
+        g1= float((ein-es_i)/(es[i+1]-es_i))
+
+    # here shift/stretch the energy scale so that 
+    # ebins range	[24,ein]
+    # e1 range 	[24,es[i1]]
+    # e2 range	[24,es[i2]]
+    # [0,23] is out of fitting range.
+
+    ebins = np.arange(int(ein), dtype=float)*(ein-24.)/ein+24.
+    e1 = np.arange(int(ein), dtype=float)*((es[i1]-24.)/ein)+24.
+    e2 = np.arange(int(ein), dtype=float)*((es[i2]-24.)/ein)+24.
+    
+    curve = np.zeros(int(ein))
+    if (g1 == 0.):
+      a = fitparams[i1, 1:7]
+      f1 = spec.sp_brem(ebins, a)
+
+      #Fix some blowing up at low energies temporarily:
+      f1 = spec.sp_patch_drmrow(f1)
+
+      curve = f1
+      #For Notebook
+      #if keyword_set(show):
+      #  plot,ebins,f1,/xlog,/ylog,color=150,xrange=[10,5000],$
+      #    yrange=[0.0001,10000],$
+      #    xtitle='X-Ray Energy (KeV)',ytitle='Xray Flux Cts/Kev'
+      #else:
+      a = fitparams[i1, 1:7]
+      f1 = spec.sp_brem(e1, a)
+      a = fitparams[i2, 1:7]
+      f2 = spec.sp_brem(e2, a)
+
+      #Fix some blowing up at low energies temporarily:
+      f1 = spec.sp_patch_drmrow(f1)
+      f2 = spec.sp_patch_drmrow(f2)
+
+      if (loginterpolate):
+        curve = np.exp(
+          (np.log(f1)*(es[i2]-ein) + np.log(f2)*(ein-es[i1]))/
+          (es[i2]-es[i1])
+        )
+      else:
+        curve = (f1*(es[i2]-ein) + f2*(ein-es[i1])) / (es[i2]-es[i1])
+      
+      #For Notebook
+      #if keyword_set(show) then begin
+      #  plot,e1,f1,/xlog,/ylog,color=150,xrange=[10,10000],$
+      #      yrange=[0.0001,10000],linestyle=3, $
+      #      xtitle='X-Ray Energy (KeV)',$
+      #      ytitle='Xray Flux Cts/Kev'
+      #  oplot,e2,f2,color=80,linestyle=2
+      #  oplot,ebins,curve
+    
+    a = np.zeros([int(ein), 2], dtype=float)
+    a[:, 0] = ebins
+    a[:, 1] = curve
+
+    return a
+  
+  @staticmethod
+  def sp_brem(x, a):
+    e0 = a[5] #frozen
+    f = a[0] * np.exp(-(e0/(e0**a[1]-np.power(x,a[1]))))/np.power(x,a[2])*np.exp(-a[3]/(x-a[4]))
+    return f
+  
+  @staticmethod
+  def sp_patch_drmrow(f):
+    #Look for the signature of an upward spike and zero out above that:
+    n = f.size
+    shift = np.roll(f,1)
+    a = f[1:]
+    b = shift[1:]
+    w = np.where(a > b*1000.)[0]
+    if w.size > 0:
+      f[w[0]:] = 0
+    return f
 
 
- 
+  #NAME: barrel_sp_fold.pro
+  #DESCRIPTION: BARREL top-level spectral folding routine
+  #
+  #REQUIRED INPUTS:
+  #ss        spectrum structure
+  # 
+  #OPTIONAL INPUTS:
+  #method    1 = single-parameter spectrum, single drm, use "model"
+  #          2 = single fixed (file input) spectrum, single drm
+  #          3 = double fixed (file input) spectrum, single drm
+  #          4 = single-parameter spectrum, dual drm, use "model"
+  #          5 = single fixed (file input)) spectrum, dual drm
+  #          6 = double fixed (file input)) spectrum, dual drm
+  #model     spectral model of electron spectrum (default is exponential)
+  #          1 = exponential
+  #          2 = monoenergetic
+  #fitrange  energy range to use for fitting (regardless of full range
+  #          of ebins) (this is a vector [start,end]
+  #maxcycles Maximum number of times to try rescaling range for fit parameters
+  #quiet     Don't make graphs + screen output
+  #verbose   show some debugging info as fits go along
+  #modlfile        Filename for inputting a handmade model component
+  #secondmodlfile  Filename for inputting a second handmade model component
+  #bkg_renorm      match background to source > 3 MeV before subtracting
+  #
+  #OUTPUTS (written into ss structure):
+  #params            best fit parameters
+  #param_ranges      ranges on best fit parameters (1 sigma) (2x2 array)
+  #chisquare         chi-square (not reduced)
+  #dof               degrees of freedom associated with chisquare
+  #modvals           values of the fit function at the centers of the energy bins
+  #
+  #CALLS:
+  #edge_products(), (imported from solarsoft), barrel_sp_fold_m1
+  #through barrel_sp_fold_m6
+  #
+  #NOTES: 
+  #
+  #STATUS: Tested for methods 1&4 on artificial data.
+  #
+  #TO BE ADDED:
+  #     Support for other spectral models
+  #     Support for single + summed fixed spectra (from file), varying normalization
+  #
+  #REVISION HISTORY:
+  #Version 1.0 DMS 7/18/12 -- split out from barrel_folding as the new top layer
+  #                7/24/12 -- fixed minimum of plot to account for
+  #                           possible values << 1 (fixed threshold for minimum
+  #                           of plot changed to 1.d-6 instead of 0.5
+  #                           when there are real values that are too low)
+  #          2.3   8/19/12 -- added support for method 3
+  #          2.5   1/5/13 --  rewrite to support new general
+  #                           spectroscopy structure ss
+  #          2.6   5/29/13 -- adding support for L2 MSPC files (already cts/keV)
+  #          2.8   7/8/13  -- remove call to idl_screen_graphics()
+  #          3.0   9/9/13  -- set ss["numparams"] here instead of upstream at barrel_sp_make()
+  #          3.2   10/29/13 - Print total, background, and net count
+  #                           rates just before proceeding to fit
+  #                11/12/13 - plot data before fitting in case fit crashes
+  #                11/12/13 - bkg_renorm defaults to zero, not 1.
+  @staticmethod
+  def sp_fold(ss, maxcycles=30, bkg_renorm=False,
+      method=1, model=1, fitrange=[110, 2500],
+      modlfile = None, secondmodlfile=None, residuals=1):
+    
+    ss["method"] = method
+    ss["model"] = model
+    ss["fitrange"] = fitrange
+    ss["bkg_renorm"] = bkg_renorm
+    ss["modlfile"] = modlfile
+    ss["secondmodlfile"] = secondmodlfile
+
+    #CHECK CONSISTENCY OF INPUT PARAMETERS
+    if (ss["method"] > 4) and (ss["drm2type"] == -1):
+      print('BARREL_SP_FOLD: Method > 3 requires a second response matrix (drm2).')
+    if (ss["method"] != 1 and ss["method"] != 4 and ss["modlfile"] == ""):
+      print('BARREL_SP_FOLD: This method requires a filename for an input model (modlfile)')
+    if (ss["method"] == 3 or ss["method"] == 6 and (ss["modlfile"] == "" or ss["secondmodlfile"] == "")):
+      print('BARREL_SP_FOLD: This method requires two filenames for input models (modlfile, secondmodlfile)')
+
+    #Create energy bin centers and widths, find bins to use in fit:
+    [ctwidth, ctmean, ctgmean] = spec.edge_products(ss["e_bins"])
+    [elwidth, elmean, elgmean] = spec.edge_products(ss["ele_bins"])
+
+    usebins = np.where(np.all(ctmean > ss["fitrange"][0], ctmean < ss["fitrange"][1]))
+
+    #Subtract background & calculate error bars on subtracted spectrum -- cts/keV:
+    src_spec = ss["src_spec"]/ss["src_live"] 
+    bkg_spec = ss["bkg_spec"]/ss["bkg_live"] 
+    src_spec_err = ss["src_spec_err"]/ss["src_live"]
+    bkg_spec_err = ss["bkg_spec_err"]/ss["bkg_live"]
+    renorm = 1.
+    if (ss["bkg_renorm"]): 
+      #normalize bkg so that it matches src at high energies.
+      #med.spectra will only go up to 4 MeV, so we are keeping a
+      #band at least 750 keV up to that, even though the hardest
+      #drep might put a few counts into the bottom of this range.
+
+      w = np.where((ctmean > 3250.) & (ctmean < 6750.))
+      renorm = src_spec[w].sum() / bkg_spec[w].sum()
+      print("Background renormalization factor: {}".format(renorm))
+      
+    ss["bkg_spec"] = ss["bkg_spec"] * renorm
+    ss["subspec"] = ss["src_spec"] - ss["bkg_spec"]
+    ss["subspec_err"] = np.sqrt(np.power(ss["src_spec_err"], 2) + np.power((ss["bkg_spec_err"] * renorm), 2) )
+    print("Total count rate:      {} c/s".format((ss["src_spec"]*ctwidth).sum()))
+    print("Background count rate: {} c/s".format((ss["bkg_spec"]*ctwidth).sum()))
+    print("Net count rate:        {} c/s".format((ss["subspec"]*ctwidth).sum()))
+    
+    #plot the data points: MOVE TO NOTEBOOK
+    #window,xsize=500,ysize=800
+    #loadct2,13
+    #!p.multi=[0,1,3]
+    #plot,ctmean,srcspec,/xlog,/ylog,xrange=[min(ctmean)/1.5,max(ctmean)*1.5],$
+    #     yrange=[max([1.d-2,min(srcspec)/1.5]),max(srcspec)*1.5],$
+    #     xtitle='Energy, keV',ytitle='counts/keV/s',psym=3,$
+    #     position=[0.12,0.65,0.97,0.98],charsize=2
+    #oplot,ctmean,bkgspec,col=2
+    #if renorm NE 1. then oplot,ctmean,bkgspec/renorm,col=4
+    #for i=0, n_elements(subspec)-1 do begin
+    #     oplot,[ctmean[i],ctmean[i]],$
+    #           [srcspec[i]-srcspecerr[i],srcspec[i]+srcspecerr[i]], psym=0
+    #     oplot,[ctmean[i]-ctwidth[i]/2.,ctmean[i]+ctwidth[i]/2.],$
+    #           [srcspec[i],srcspec[i]], psym=0
+    #endfor
+    
+    
+    #Do the actual fitting according to the chosen method:
+    if method == 1:
+      [params, param_ranges, modvals, chisquare, dof] = spec.sp_fold_m1(
+        elmean, elwidth, ctwidth, ctmean, usebins, maxcycles)
+    elif method == 2:
+      [params, param_ranges, modvals, chisquare, dof] = spec.sp_fold_m2(
+        elmean, elwidth, ctwidth, usebins, maxcycles)
+    elif method == 3:
+      [params, param_ranges, modvals, chisquare, dof] = spec.sp_fold_m3(
+        secondmodlfile, elmean, elwidth, ctwidth, usebins, maxcycles)
+    elif method == 4:
+      [params, param_ranges, modvals, chisquare, dof] = spec.sp_fold_m4(
+        elmean, elwidth, ctwidth, usebins, maxcycles)
+
+    return
+  
+  @staticmethod
+  def sp_fold_m1(ss, phmean, phwidth, ctwidth, ctmean, usebins, maxcycles):
+    #Find good starting parameters:
+    if (ss["model"] == 1):
+      #This formula for approximate e-folding from a count ratio between
+      #two bands is empirical from simulations. 
+      energies=dbase["guess_efold"]
+      ratios=dbase["guess_efold_ratios"]
+    elif (ss["model"] == 2):
+      energies=dbase["guess_emono"]
+      ratios=dbase["guess_emono_ratios"]
+    
+    w1 = np.where((ctmean > 110.) & (ctmean < 150.))[0]
+    w2 = np.where((ctmean > 200.) & (ctmean < 250.))[0]
+    rat = ss["subspec"][w2].sum()/ss["subspec"][w1].sum()
+    
+    if (rat < ratios.min()):
+      startpar = min(energies)
+    elif (rat > ratios.max()):
+      startpar = max(energies)
+    else:
+      startpar = np.interp(rat, energies, ratios)
+        
+    if (ss["model"] == 1):
+      tryspec = np.matmul((np.exp(-phmean/startpar)*phwidth), ss["drm"])
+    elif ss["model"] == 2:
+      tryspec = phmean*0.
+      tryspec[np.where( np.abs(phmean-startpar) == np.abs(phmean-startpar).min())[0][0] ] = 1.
+      tryspec = np.matmul(tryspec, ss["drm"])
+    else:
+      print('Only exponential or monoenergetic spectrum is currently supported.')
+
+    #Find a starting normalization by scaling area of model and data
+    #(this will be the same procedure for every starting model):
+    startnorm = (ss["subspec"][usebins]*ctwidth[usebins] ).sum() / ( tryspec[usebins]*ctwidth[usebins] ).sum()
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = [0.5,0.5]  #[norm,par]: best values +/- 50%
+
+    
+    print('iter#', 'startpar','startnorm','bestpar','bestnorm','scalepar','scalenorm','bestchi')    
+    #format='(a8,4a11,2a13,a10)'
+    
+    #Iterate the fit, adjusting the scale dynamically:
+    #barrel_sp_fitgrid1, subspec, subspecerr, model, drm, phmean, phwidth, usebins, startpar, $
+    #     startnorm, points, scaling, bestpar, bestnorm, bestparn, bestnormn, modvals, $
+    #     chiarray, bestchi, pararray, normarray
+    for i in range(maxcycles):
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = spec.sp_fitgrid1(
+        phmean, phwidth, usebins, startpar, startnorm, points, scaling
+      )
+      
+      #if best value is not on boundary, zoom in or finish.
+      #Note that zooming in or out on scalingdrm doesn't do anything if
+      #you aren't using two drms.
+      if np.abs(bestnormn) != points and scaling[0] >= 0.001:
+        scaling[0] /= 2.5
+      if np.abs(bestparn) != points and scaling[1] >= 0.001:
+        scaling[1] /= 2.5
+
+      #If scaling is now very fine, break.  Note that the last values of the
+      #scaling parameters recorded here aren't really the last
+      #values used, the last value used could be 2.5 times higher in one or more:
+      if scaling[0] < 0.001 and scaling[1] < 0.001:
+        break
+
+      if np.abs(bestnormn) == points:
+        scaling[0] *= 2.0
+      if np.abs(bestparn) == points:
+        scaling[1] *= 2.0
+
+      print(i,startpar,startnorm,bestpar,bestnorm,scaling[1],scaling[0],bestchi)
+      #format='(i8,4f11.3,2f13.6,f13.4)'
+
+      startpar = bestpar
+      startnorm = bestnorm
+
+    #If it never got to the finest scale, break with error:
+    if scaling[0] > 0.001 or scaling[1] > 0.001:
+      print, 'WARNING: Fit failed to converge in maximum number of cycles.'
+
+    #Set most output variables (either 2 or 3 best-fit params depending on
+    #treatment of response matrices:
+    params = [bestnorm, bestpar]
+    chisquare = bestchi
+    dof = usebins.size - 2
+
+    #Only one thing left: the error on the parameters.  This requires more
+    #effort.  Here we will wander radially outwards until we find that the
+    #whole boundary has chisq > chimin
+    #Always center on the best value:
+    startpar = bestpar
+    startnorm = bestnorm
+    points = 10
+
+    #Create masks for the outer boundary of the chi-square space:
+    edges1 = np.zeros([2*points+1, 2*points+1])
+    edges2 = np.zeros([2*points+1, 2*points+1])
+    edges1[:, 0] = 1
+    edges1[:, 2*points] = 1
+    edges2[0, :] = 1
+    edges2[2*points, :] = 1
+
+    #Create initial values for error bar search:
+    scaling = [0.1, 0.1]   #first guess
+    scaling0 = scaling
+    minscaling = scaling
+    goingup = [0,0]
+
+    for i in range(maxcycles):      
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = spec.sp_fitgrid1(
+        phmean, phwidth, usebins, startpar, startnorm, points, scaling
+      )
+      #First see if the contour is completely closed:
+      #Look for chisq < min_chisq + 1 on boundary:
+      w1 = np.where((edges1.astype(bool)) & (chiarray <= chisquare + 1))[0]
+      w2 = np.where((edges2.astype(bool)) & (chiarray <= chisquare + 1))[0]
+      nw1 = 0
+      for dim in w1: nw1 += dim.size
+      nw2 = 0
+      for dim in w2: nw2 += dim.size
+      nw=[nw1,nw2]
+
+      #If the boundary is entirely outside of the chi-square contour, zoom
+      #in by a factor of 2, unless you had already zoomed out, in which 
+      #case you've actually identified the right scale:
+      if (np.sum(nw) == 0):
+        if (np.sum(goingup) == 2):
+          break
+        if (not goingup[0]): scaling[0] /= 2.0
+        if (not goingup[1]): scaling[1] /= 2.0
+        continue
+    
+      #If boundary not entirely clear, take each axis separately, and
+      #expand or contract the scaling:
+      for j, v in enumerate(nw):
+        if (nw[j] > 0):
+          goingup[j] = 1
+          scaling[j] *= 2.0
+        else:
+          if (not goingup[j]): scaling[j] /= 2.0 
+      
+      #Now that we've found the appropriate scaling (within a factor
+      #of 2 of the point where the last good fit appears on the boundary), 
+      #do one very fine map of chisquare space to find the error bars:
+
+      points = 40
+
+      [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray] = spec.sp_fitgrid1(
+        phmean, phwidth, usebins, startpar, startnorm, points, scaling
+      )
+
+      #Pick out the subset of points within the min(chisquare)+1. contour:
+      w = np.where(chiarray < chisquare + 1.)[0]
+      if w.size == 0:
+        print('Failure in finding error bars.')
+
+      #This makes up the last needed output parameter: ranges of the parameters
+      param_ranges = [
+        [np.min(normarray[w]), np.max(normarray[w])],
+        [np.min(pararray[w]), np.max(pararray[w])]
+      ]
+
+    return [params, param_ranges, modvals, chisquare, dof]
+  
+  @staticmethod
+  def sp_fold_m2(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspec_err"]
+    modlfile = ss["modlfile"]
+    drm = ss["drm"]
+    
+    ### FIX - Should modelspec be attached to self? Or passed into fitgrid?
+    modelspec = spec.sp_readmodelspec(modlfile, phebins, phmean)
+
+    tryspec = np.matmul(drm, modelspec*phwidth)
+
+    #Find a starting normalization by scaling area of model and data
+    #(this will be the same procedure for every starting model):  
+
+    startnorm = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec[usebins]*ctwidth[usebins] )
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = [0.5]  #[norm]: best value +/- 50%
+
+    
+    print('iter#', 'startnorm','bestnorm','scalenorm','bestchi')
+    #format='(a8,2a11,a13,a10)'
+
+    #Iterate the fit, adjusting the scale dynamically:
+    for i in range(maxcycles):
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = spec.sp_fitgrid2(
+        phmean, phwidth, usebins, startnorm, points, scaling
+      )
+      
+      #if best value is not on boundary, zoom in or finish.
+      #Note that zooming in or out on scalingdrm doesn't do anything if
+      #you aren't using two drms.
+
+      if (np.abs(bestnormn) != points and scaling[0] >= 0.001):
+        scaling[0] /= 2.5
+    
+      #If scaling is now very fine, break.  Note that the last values of the
+      #scaling parameters recorded here aren't really the last
+      #values used, the last value used could be 2.5 times higher in one or more:
+      if (scaling[0] < 0.001):
+        break
+
+      if (np.abs(bestnormn) == points):
+        scaling[0] *= 2.0
+
+      print(i,startnorm,bestnorm,scaling[0],bestchi)
+      #format='(i8,2f11.3,f13.6,f13.4)'
+
+      startnorm = bestnorm
+
+
+    #If it never got to the finest scale, break with error:
+    if (scaling[0] > 0.001):
+        print('Fit failed to converge in maximum number of cycles.')
+
+    #Set most output variables (either 2 or 3 best-fit params depending on
+    #treatment of response matrices:
+    params = [bestnorm]
+    chisquare = bestchi
+    dof = usebins.size - 2
+
+    #Only one thing left: the error on the parameters.  This requires more
+    #effort.  Here we will wander radially outwards until we find that the
+    #whole boundary has chisq > chimin
+    #Always center on the best value:
+    startnorm = bestnorm
+    points = 10
+
+    #Create masks for the outer boundary of the chi-square space:
+    edges = np.zeros(2*points+1, dtype=int)
+    edges[0] = 1
+    edges[2*points] = 1
+
+    #Create initial values for error bar search:
+    scaling = [0.1] #first guess
+    scaling0 = scaling
+    minscaling = scaling
+    goingup = 0
+
+    for i in range(maxcycles):
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = spec.sp_fitgrid2(
+        phmean, phwidth, usebins, startnorm, points, scaling
+      )
+
+      #First see if the contour is completely closed:
+      #Look for chisq < min_chisq + 1 on boundary:
+      w1 = np.where(edges.astype(bool) & (chiarray < chisquare + 1.))[0]
+      nw = w1.size
+
+      #If the boundary is entirely outside of the chi-square contour, zoom
+      #in by a factor of 2, unless you had already zoomed out, in which 
+      #case you've actually identified the right scale:
+      if (nw == 0):
+          if (goingup):
+            break
+          scaling[0] /= 2.0
+          continue
+          
+      if (nw > 0):
+          goingup = 1
+          scaling[0] *= 2.0
+
+      #Now that we've found the appropriate scaling (within a factor
+      #of 2 of the point where the last good fit appears on the boundary), 
+      #do one very fine map of chisquare space to find the error bars:
+
+      points = 40
+
+      [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray] = spec.sp_fitgrid2(
+        phmean, phwidth, usebins, startnorm, points, scaling
+      )
+
+      #Pick out the subset of points within the min(chisquare)+1. contour:
+      w = np.where(chiarray < chisquare + 1.)[0]
+      nw = w.size
+      if (nw == 0):
+        print('Failure in finding error bars.')
+
+      #This makes up the last needed output parameter: ranges of the parameters
+      param_ranges = [ [np.min(normarray[w]), np.max(normarray[w])] ]
+
+    return [params, param_ranges, modvals, chisquare, dof]
+
+  @staticmethod
+  def sp_fold_m3(ss, phebins, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspec_err"]
+    modlfile = ss["modlfile"]
+    secondmodlfile = ss["secondmodlfile"]
+    drm = ss["drm"]
+
+    ### FIX 
+    modelspec1 = spec.sp_readmodelspec(modlfile, phebins, phmean)    
+    modelspec2 = spec.sp_readmodelspec(secondmodlfile, phebins, phmean)
+
+    #Initial starting parameter is equal parts of each model
+    tryspec1 = np.matmul(drm, modelspec1*phwidth)
+    tryspec2 = np.matmul(drm, modelspec2*phwidth)
+
+    #Find a starting normalization by scaling area of model and data;
+    #start with the assumption that each component carries half the counts.
+    startnorm1 = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec1[usebins]*ctwidth[usebins] ) / 2.
+    startnorm2 = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec2[usebins]*ctwidth[usebins] ) / 2.
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = [0.5,0.5]  #[norm1,norm2]: best values +/- 50%
+
+    print('iter#', 'startnorm1','startnorm2','bestnorm1','bestnorm2','scalenorm1','scalenorm2','bestchi')
+    #format='(a8,4a11,2a13,a10)'
+
+    #Iterate the fit, adjusting the scale dynamically:
+    for i in range(maxcycles):
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = spec.sp_fitgrid3(
+        ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      )
+
+      #if best value is not on boundary, zoom in or finish.
+      #Note that zooming in or out on scalingdrm doesn't do anything if
+      #you aren't using two drms.
+
+      if (np.abs(bestnorm1n) != points and scaling[0] >= 0.001):
+        scaling[0] /= 2.5
+      if (np.abs(bestnorm2n) != points and scaling[1] >= 0.001):
+        scaling[1] /= 2.5
+
+      #If scaling is now very fine, break.  Note that the last values of the
+      #scaling parameters recorded here aren't really the last
+      #values used, the last value used could be 2.5 times higher in one or more:
+      if (scaling[0] < 0.001 and scaling[1] < 0.001):
+        break
+
+      if (np.abs(bestnorm1n) == points):
+        scaling[0] *= 2.0
+      if (np.abs(bestnorm2n) == points):
+        scaling[1] *= 2.0
+
+      print(i,startnorm1,startnorm2,bestnorm1,bestnorm2,scaling[0],scaling[1],bestchi)
+      #format='(i8,4f11.3,2f13.6,f13.4)'
+
+      startnorm1 = bestnorm1
+      startnorm2 = bestnorm2
+
+    #If it never got to the finest scale, break with error:
+    if (scaling[0] > 0.001 or scaling[1] > 0.001):
+        print(' Fit failed to converge in maximum number of cycles.')
+
+    #Set most output variables (either 2 or 3 best-fit params depending on
+    #treatment of response matrices:
+    params = [bestnorm1, bestnorm2]
+    chisquare = bestchi
+    dof = usebins.size - 2
+
+    #Only one thing left: the error on the parameters.  This requires more
+    #effort.  Here we will wander radially outwards until we find that the
+    #whole boundary has chisq > chimin
+    #Always center on the best value:
+    startnorm1 = bestnorm1
+    startnorm2 = bestnorm2
+    points = 10
+
+    #Create masks for the outer boundary of the chi-square space:
+    edges1 = np.zeros([2*points+1,2*points+1], dtype=int)
+    edges2 = np.zeros([2*points+1,2*points+1], dtype=int)
+    edges1[:, 0] = 1
+    edges1[:, 2*points] = 1
+    edges2[0, :] = 1
+    edges2[2*points, :] = 1
+
+    #Create initial values for error bar search:
+    scaling = [0.1, 0.1]   #first guess
+    scaling0 = scaling
+    minscaling = scaling
+    goingup = [0,0]
+
+    print('Starting search for error contour.')
+
+    for i in range(maxcycles):
+      [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = spec.sp_fitgrid3(
+        ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+      )
+
+      #First see if the contour is completely closed:
+      #Look for chisq < min_chisq + 1 on boundary:
+      w1 = np.where(edges1.astype(bool) & (chiarray <= chisquare + 1.))[0]
+      nw1 = w1.size
+      w2 = np.where(edges2.astype(bool) & (chiarray <= chisquare + 1.))[0]
+      nw2 = w2.size
+      nw=[nw1,nw2]
+
+      #If the boundary is entirely outside of the chi-square contour, zoom
+      #in by a factor of 2, unless you had already zoomed out, in which 
+      #case you've actually identified the right scale:
+      if (np.sum(nw) == 0):
+          if (np.sum(goingup) == 2):
+            break
+          for j in (0,1):
+            if (not goingup[j]):
+              scaling[j] /= 2.0
+          continue
+      
+      #If boundary not entirely clear, take each axis separately, and
+      #expand or contract the scaling:
+      for j in (0,1):
+        if (nw[j] > 0):
+          goingup[j] = 1
+          scaling[j] *= 2.0
+        else:
+          if (not goingup[j]):
+            scaling[j] /= 2.0
+
+      
+          #This is a useful diagnostic check on the contour changing algorithm:
+          #contour,chiarray,levels=[chisquare+1.,chisquare+3.,chisquare+20.]
+          print(i,startnorm1,startnorm2,bestnorm1,bestnorm2,scaling[0],scaling[1],bestchi)
+          #format='(i8,4f11.3,2f13.6,f13.4)'
+
+    #Now that we've found the appropriate scaling (within a factor
+    #of 2 of the point where the last good fit appears on the boundary), 
+    #do one very fine map of chisquare space to find the error bars:
+
+    points = 40
+
+    [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals, secondmodvals, chiarray, bestchi, norm1array, norm2array] = spec.sp_fitgrid3(
+      ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling
+    )
+
+    #Pick out the subset of points within the min(chisquare)+1. contour:
+    w = np.where(chiarray < chisquare + 1.)[0]
+    nw = w.size
+    if (nw == 0):
+      print('Failure in finding error bars.')
+
+    #This makes up the last needed output parameter: ranges of the parameters
+    param_ranges = [
+      [np.min(norm1array[w]), np.max(norm1array[w])],
+      [np.min(norm2array[w]), np.max(norm2array[w])]
+    ]
+
+    return [params, param_ranges, modvals, secondmodvals, chisquare, dof]
+
+  @staticmethod
+  def sp_fold_m4(ss, phmean, phwidth, ctwidth, usebins, maxcycles):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspecerr"]
+    model = ss["model"]
+    drm = ss["drm"]
+    drm2 = ss["drm2"]
+
+    if (model == 1):
+      #This formula for approximate e-folding from a count ratio between
+      #two bands will be empirical from simulations.  For now, we will start
+      #with folding energy = 300 keV
+      #    countratio = total(subspec[where(ebins GT ?? and ebins LT ??)]) / $  
+      #                 total(subspec[where(ebins GT ?? and ebins LT ??)]) 
+      #    startpar = ?? ;function of countratio
+      startpar = 300.
+      tryspec = np.matmul(drm, np.exp(-phmean/startpar)*phwidth)
+    elif (model == 2):
+        startpar = 1000.
+        tryspec = phmean*0.
+        tryspec[
+          (
+            np.where( np.abs(phmean-startpar) == np.min(np.abs(phmean-startpar)) )[0]
+          )[0]
+        ] = 1.
+        tryspec = np.matmul(drm, tryspec*phwidth)
+    else:
+      print('Only exponential or monoenergetic spectrum is currently supported.')
+
+    #Find a starting normalization by scaling area of model and data
+    #(this will be the same procedure for every starting model):
+    startnorm = np.sum( subspec[usebins]*ctwidth[usebins] ) / np.sum( tryspec[usebins]*ctwidth[usebins] )
+
+    #Try a starting range around these trial values.  If the minimum 
+    #chi-square is not on the boundary, zoom in.  If it is, zoom out.
+    #In either case, recenter.
+
+    points = 10   #always run a 21x21(x21) grid
+    scaling = np.array([0.5,0.5,0.5])  #[norm,par,drm]: best values +/- 50% (norm&par) or just +/- 0.5 (drm)
+
+    print(
+      'iter#', 'startpar','startnorm','startdrm','bestpar','bestnorm','bestdrm',
+      'scalepar','scalenorm','scaledrm','bestchi'
+    )
+    #format='(a8,6a11,3a13,a10)'
+
+    #Iterate the fit, adjusting the scale dynamically:
+    for i in range(maxcycles):
+        [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = spec.sp_fitgrid4(
+          ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+        )
+        #if best value is not on boundary, zoom in or finish.
+        #Note that zooming in or out on scalingdrm doesn't do anything if
+        #you aren't using two drms.
+
+        if (np.abs(bestnormn) != points and scaling[0] >= 0.001):
+          scaling[0] /= 2.5
+        if (np.abs(bestparn) !=  points and scaling[1] >= 0.001):
+          scaling[1] /= 2.5
+        if (np.abs(bestdrmn) !=  points and scaling[2] >= 0.001):
+          scaling[2] /= 2.5
+
+        #If scaling is now very fine, break.  Note that the last values of the
+        #scaling parameters recorded here aren't really the last
+        #values used, the last value used could be 2.5 times higher in one or more:
+        if (scaling[0] < 0.001 and scaling[1] < 0.001 and scaling[2] < 0.001):
+          break
+
+        if (np.abs(bestnormn) == points):
+          scaling[0] *= 2.0
+        if (np.abs(bestparn) == points):
+          scaling[1] *= 2.0
+        if (np.abs(bestdrmn) == points):
+          scaling[2] *= 2.0
+
+        print(i,startpar,startnorm,startdrm,bestpar,bestnorm,bestdrm,scaling[1],scaling[0],scaling[2],bestchi)
+        #format='(i8,6f11.3,3f13.6,f13.4)'
+
+        startpar = bestpar
+        startnorm = bestnorm
+        startdrm = bestdrm
+
+    #If it never got to the finest scale, break with error:
+    if (scaling[0] > 0.001 or scaling[1] > 0.001 or scaling[2] > 0.001):
+      print('Fit failed to converge in maximum number of cycles.')
+
+    #Set most output variables (either 2 or 3 best-fit params depending on
+    #treatment of response matrices:
+    params = [bestnorm, bestpar, bestdrm]
+    chisquare = bestchi
+    dof = usebins.size - 2
+
+    #Only one thing left: the error on the parameters.  This requires more
+    #effort.  Here we will wander radially outwards until we find that the
+    #whole boundary has chisq > chimin
+    #Always center on the best value:
+    startpar = bestpar
+    startnorm = bestnorm
+    stardrm = bestdrm
+    points = 10
+
+    #Create masks for the outer boundary of the chi-square space:
+    edges1 = np.zeros([2*points+1,2*points+1,2*points+1], dtype=int)
+    edges2 = np.zeros([2*points+1,2*points+1,2*points+1], dtype=int)
+    edges3 = np.zeros([2*points+1,2*points+1,2*points+1], dtype=int)
+    
+    edges1[:,:,0] = 1
+    edges1[:,:,2*points] = 1
+    edges2[:,0,:] = 1
+    edges2[:,2*points,:] = 1
+    edges3[0,:,:] = 1
+    edges3[2*points,:,:] = 1
+
+    #Create initial values for error bar search:
+    scaling = [0.1, 0.1, 0.1]   #first guess
+    scaling0 = scaling
+    minscaling = scaling
+    goingup = [0,0,0]
+
+    for i in maxcycles:
+      [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = spec.sp_fitgrid4(
+        ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+      )
+      
+      #First see if the contour is completely closed:
+      #Look for chisq < min_chisq + 1 on boundary:
+      w1 = np.where(edges1.astype(bool) & (chiarray <= chisquare + 1.))[0]
+      nw1 = w1.size
+      w2 = np.where(edges2.astype(bool) & (chiarray <= chisquare + 1.))[0]
+      nw2 = w2.size
+      w3 = np.where(edges3.astype(bool) & (chiarray <= chisquare + 1.))[0]
+      nw3 = w3.size
+      nw=[nw1,nw2,nw3]
+
+      #If the boundary is entirely outside of the chi-square contour, zoom
+      #in ALL AXES by a factor of 2, unless you had already zoomed out, in which 
+      #case you've actually identified the right scale:
+      if (np.sim(nw) == 0):
+          if (np.sum(goingup) == 3):
+            break
+          for j in (0, 1, 2):
+            if (not goingup[j]):
+              scaling[j] /= 2.0
+          continue
+      
+      #If boundary not entirely clear, take each axis separately, and
+      #expand or contract the scaling:
+      for j in (0, 1, 2):
+        if (nw[j] > 0):
+          goingup[j] = 1
+          scaling[j] *= 2.0
+        else:
+          if (not goingup[j]):
+            scaling[j] /= 2.0
+
+    #Now that we've found the appropriate scaling (within a factor
+    #of 2 of the point where the last good fit appears on the boundary), 
+    #do one very fine map of chisquare space to find the error bars:
+
+    points = 40
+    [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray] = spec.sp_fitgrid4(
+      ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling
+    )
+
+    #Pick out the subset of points within the min(chisquare)+1. contour:
+    w = np.where(chiarray < chisquare + 1.)[0]
+    nw = w.size
+    if (nw == 0):
+      print('Failure in finding error bars.')
+
+    #This makes up the last needed output parameter: ranges of the parameters
+    param_ranges = [
+      [np.min(normarray[w]), np.max(normarray[w])],
+      [np.min(pararray[w]), np.max(pararray[w])],
+      [np.min(drmarray[w]), np.max(drmarray[w])]
+    ]
+
+    return [params, param_ranges, modvals, chisquare, dof]
+  
+  @staticmethod
+  def sp_fitgrid1(ss, phmean, phwidth, usebins, startpar, startnorm, points, scaling):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspecerr"]
+    model = ss["model"]
+    drm = ss["drm"]
+
+    #Set up the vectors of values for parameters and normalizations:
+    pts = 2*points + 1
+    normvector = [np.array(range(pts))-points]*scaling[0]/points*startnorm + startnorm
+    parvector  = [np.array(range(pts))-points]*scaling[1]/points*startpar + startpar
+    parrange   = [np.min(parvector),max(parvector)]
+
+    if (model == 2):
+      #Reassign minimum/maximum if they are going to force the fit to go
+      #out of range (this is particular to the monoenergetic model)
+      minpossible = phmean[1]
+      w = np.where(parvector <= minpossible)[0]
+      nl = w.size
+      
+      maxpossible = phmean[phmean.size - 2]
+      w = np.where(parvector >= maxpossible)[0]
+      ng = w.size
+
+      if nl > 0 or ng > 0:
+        parstart  = np.max([minpossible, np.min(parvector)])
+        parend    = np.min([maxpossible, np.max(parvector)])
+        parvector = np.array(range(pts)) * (parend - parstart) / (1 * pts) + parstart
+        print('rescaled from ',parrange, ' to ',[min(parvector),max(parvector)])
+    
+    #Set up the output arrays:
+    pararray  = np.zeros([pts,pts])
+    normarray = np.zeros([pts,pts])
+    chiarray  = np.zeros([pts,pts])
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1e10
+
+    #Loop away!
+
+    for j in range(pts):         #over spectral parameter
+      #Set up the model, photons/bin:
+      if (model == 1):
+        vals = np.exp(-phmean/parvector[j])*phwidth
+        foldvals = np.matmul(drm, vals)
+      elif (model == 2):
+        #In order to differentiate between different energies within one input
+        #bin, evaluate the bins to either side, fit a quadratic, and
+        #interpolate to the exact target energy:
+        vals1 = phmean*0.
+        vals2 = phmean*0.
+        vals3 = phmean*0.
+        bin2 = (
+          np.where( np.abs(phmean-parvector[j])==np.min(np.abs(phmean-parvector[j])) )[0]
+        )[0]
+        bin1 = bin2 - 1
+        bin3 = bin2 + 1
+        if (bin1 < 0 or bin3 > phmean.size-1):
+          print('Tried energy out of range.')
+        vals1[bin1]=1
+        vals2[bin2]=1
+        vals3[bin3]=1
+        foldvals1 = np.matmul(drm,vals1)
+        foldvals2 = np.matmul(drm,vals2)
+        foldvals3 = np.matmul(drm,vals3)
+        foldvals = foldvals2*0 #QUESTION: What is this doing?
+        for i in range(foldvals1.size):
+          y = [foldvals1[i], foldvals2[i], foldvals3[i]]
+          x = [phmean[bin1], phmean[bin2], phmean[bin3]]
+          r = np.polyfit(x,y,2)
+          foldvals[i] = r[2] + r[1]*parvector[j] + r[0]*np.power(parvector[j],2)
+        
+      else:
+        print('Only exponential or monoenergetic spectra are currently supported.')
+
+      #Test different normalizations against the data:
+      for i in range(pts):
+        normarray[i,j] = normvector[i]
+        pararray[i,j]  = parvector[j]
+        chiarray[i,j]  = np.sum(
+          np.power(
+            (subspec[usebins] - normvector[i]*foldvals[usebins])/subspecerr[usebins],
+            2
+          )
+        )
+   
+    #Find the best fit and set output parameters:
+    bestchi = np.min(chiarray)
+    w = (
+      np.where(chiarray == bestchi)[0]
+    )[0]
+    bestpar = pararray[w]
+    bestnorm = normarray[w]
+    bestparn = (
+      np.where(parvector == bestpar)[0]
+    )[0] - points
+    bestnormn = (
+      np.where(normvector == bestnorm)[0]
+    )[0] - points
+    
+    if (model == 1):
+      modvals = bestnorm * np.matmul(drm, (np.exp(-phmean/bestpar)*phwidth))
+    elif (model == 2):
+      modvals = 0*phmean
+      w = (np.where( np.abs(phmean-bestpar) == min(np.abs(phmean-bestpar)))[0])[0]
+      modvals[w]= bestnorm
+      modvals = np.matmul(drm,modvals)
+    
+    return [bestpar, bestnorm, bestparn, bestnormn, modvals, chiarray, bestchi, pararray, normarray]
+  
+  @staticmethod
+  def sp_fitgrid2(ss, phmean, phwidth, usebins, startnorm, points, scaling):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspecerr"]
+    modelspec = ss["modelspec"]
+    drm = ss["drm"]
+
+    pts = 2*points + 1
+    normvector = [np.arange(pts)-points]*scaling[0]/points*startnorm + startnorm
+
+    #Set up the output arrays:
+    chiarray = np.zeros(pts)
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1e10
+
+    #Loop away!
+
+    foldvals = np.matmul(drm, modelspec*phwidth)
+    for j in range(pts): #over normalization
+      chiarray[j] = np.sum( np.power( (subspec[usebins] - normvector[j]*foldvals[usebins])/subspecerr[usebins], 2) )
+    normarray = normvector
+
+    #Find the best fit and set output parameters:
+
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestnorm = normarray[w]
+    bestnormn = (np.where(normvector == bestnorm)[0])[0] - points
+    modvals = bestnorm * np.matmul(drm, (modelspec*phwidth) )
+
+    return [bestnorm, bestnormn, modvals, chiarray, bestchi, normarray]
+
+  @staticmethod
+  def sp_fitgrid3(ss, phmean, phwidth, usebins, startnorm1, startnorm2, points, scaling):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspecerr"]
+    modelspec1 = ss["modelspec1"]
+    modelspec2 = ss["modelspec2"]
+    drm = ss["drm"]
+
+    #Set up the vectors of values for parameters and normalizations:
+    pts = 2*points + 1
+    norm1vector = [np.arange(pts)-points]*scaling[0]/points*startnorm1 + startnorm1
+    norm2vector = [np.arange(pts)-points]*scaling[1]/points*startnorm2 + startnorm2
+
+    #Set up the output arrays:
+    norm1array = np.zeros([pts,pts])
+    norm2array = np.zeros([pts,pts])
+    chiarray   = np.zeros([pts,pts])
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1e10
+
+    #Loop away!
+
+    for j in range(pts): #over normalization 1
+      foldvals1 = np.matmul(drm, norm1vector[j]*modelspec1*phwidth)
+
+      for i in range(pts): #over normalization 2
+        foldvals2 = np.matmul(drm, norm2vector[i]*modelspec2*phwidth)
+
+        #Test different normalizations against the data:
+        norm1array[j,i] = norm1vector[j]
+        norm2array[j,i] = norm2vector[i]
+        chiarray[j,i] = np.sum( np.power( (subspec[usebins] - (foldvals1[usebins]+foldvals2[usebins])) / subspecerr[usebins] ), 2 )
+
+    #Find the best fit and set output parameters:
+
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestnorm1 = norm1array[w]
+    bestnorm2 = norm2array[w]
+    bestnorm1n = (np.where(norm1vector == bestnorm1)[0])[0] - points
+    bestnorm2n = (np.where(norm2vector == bestnorm2)[0])[0] - points
+    modvals1 = bestnorm1 * np.matmul(drm, (modelspec1*phwidth))
+    modvals2 = bestnorm2 * np.matmul(drm, (modelspec2*phwidth))
+
+    return [bestnorm1, bestnorm2, bestnorm1n, bestnorm2n, modvals1, modvals2, chiarray, bestchi, norm1array, norm2array]
+  
+  @staticmethod
+  def sp_fitgrid4(ss, phmean, phwidth, usebins, startpar, startnorm, startdrm, points, scaling):
+    subspec = ss["subspec"]
+    subspecerr = ss["subspecerr"]
+    model = ss["model"]
+    drm = ss["drm"]
+    drm2 = ss["drm2"]
+
+    #Set up the vectors of values for parameters and normalizations:
+    pts = 2*points + 1
+    normvector = [np.arange(pts)-points]*scaling[0]/points*startnorm + startnorm
+    parvector  = [np.arange(pts)-points]*scaling[1]/points*startpar + startpar
+    drmvector  = [np.arange(pts)-points]*scaling[2]/points + startdrm
+
+    #Rescale drm vector to omit unphysical regions (< 0, > 1):
+    drmlow = np.where(drmvector < 0.)[0]
+    nlow = drmlow.size
+    drmhigh = np.where(drmvector > 1.)[0]
+    nhigh = drmhigh.size
+    drmmin = np.min(drmvector)
+    drmmax = np.max(drmvector)
+    if (nlow > 0):
+      drmmin = 0
+    if (nhigh > 0):
+      drmmax = 1
+    if (nlow > 0 or nhigh > 0):
+      drmvector = drmmin + (drmmax-drmmin)*np.arange(pts)/(1.*(pts-1.))
+
+    #Set up the output arrays:
+    pararray  = np.zeros([pts,pts,pts])
+    normarray = np.zeros([pts,pts,pts])
+    drmarray  = np.zeros([pts,pts,pts])
+    chiarray  = np.zeros([pts,pts,pts])
+
+    #Initialize best chi-square as something awful:
+    bestchi = 1.e10
+
+    #Loop away!
+
+    for k in range(pts):  #over drm
+      thisdrm = drm*drmvector[k] + drm2*(1.0 - drmvector[k])
+
+      for j in range(pts): #over spectral parameter
+        #Set up the model, photons/bin:
+        if (model == 1):
+          vals = np.exp(-phmean/parvector[j])*phwidth
+        else:
+          print('BARREL_SP_FITGRID: Only exponential spectrum is currently supported.')
+
+        #Fold through response matrix
+        foldvals = np.matmul(thisdrm, vals)
+
+        #Test different normalizations against the data:
+        for i in (pts):
+          normarray[i,j,k] = normvector[i]
+          pararray[i,j,k] = parvector[j]
+          drmarray[i,j,k] = drmvector[k]
+          chiarray[i,j,k] = np.sum( np.power( (subspec[usebins] - normvector[i]*foldvals[usebins])/subspecerr[usebins], 2) )
+      
+
+    #Find the best fit and set output parameters:
+    bestchi = np.min(chiarray)
+    w = (np.where(chiarray == bestchi)[0])[0]
+    bestpar = pararray[w]
+    bestnorm = normarray[w]
+    bestdrm = drmarray[w]
+    bestparn = (np.where(parvector == bestpar)[0])[0] - points
+    bestnormn = (np.where(normvector == bestnorm)[0])[0] - points
+    bestdrmn = (np.where(drmvector == bestdrm)[0])[0] - points
+    drmbest =  drm*bestdrm + drm2*(1.0 - bestdrm)
+    
+    if (model == 1):
+      modvals = bestnorm*np.matmul(drmbest, (np.exp(-phmean/bestpar)*phwidth))
+
+    return [bestpar, bestnorm, bestdrm, bestparn, bestnormn, bestdrmn, modvals, chiarray, bestchi, pararray, normarray, drmarray]
+
+  @staticmethod
+  def sp_readmodelspec(modlfile, phebins, phmean):
+    return
+
+  @staticmethod  
+  def rebin(oldVals, oldBins, newBins, flux=False):
+    n = oldBins.size
+    m = newBins.size
+
+    if (n < 2 or m < 2):
+      print("length(s) violation: {}, {}".format(n, m))
+    result = np.zeros((m-1), dtype=float)
+    oldLo = oldBins[0]
+    oldHi = oldBins[1]
+    newLo = newBins[0]
+    newHi = newBins[1]
+    newIndex = 0
+    oldIndex = 0
+    total = 0.
+
+    while (1):
+    #DEBUG****print,oldIndex,oldLo,oldHi,newIndex,newLo,newHi,total
+      if (oldHi <= newLo):
+        oldIndex += 1
+        if (oldIndex >= n-1):
+          return result
+        oldLo = oldHi
+        oldHi = oldBins[oldIndex+1]
+        continue
+    
+      if (newHi <= oldLo):
+        result[newIndex] = (total/(newHi-newLo)) if flux else (total/(oldHi-oldLo))
+        total = 0.
+        newIndex += 1
+        if (newIndex >= m-1):
+          return result
+        newLo = newHi
+        newHi = newBins[newIndex+1]
+        continue
+    
+      if (newHi < oldHi):
+        total += (newHi-(oldLo>newLo))*oldVals[oldIndex]
+        result[newIndex] = (total/(newHi-newLo)) if flux else (total/(oldHi-oldLo))
+        total = 0.
+        newIndex += 1
+        if (newIndex >= m-1):
+          return result
+        newLo = newHi
+        newHi = newBins[newIndex+1]
+        continue
+    
+      total += (oldHi-(oldLo>newLo))*oldVals[oldIndex]
+      oldIndex += 1
+      if (oldIndex >= n-1):
+        result[newIndex] = (total/(newHi-newLo)) if flux else (total/(oldHi-oldLo))
+        return result
+      oldLo=oldHi
+      oldHi=oldBins[oldIndex+1] 
